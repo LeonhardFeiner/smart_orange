@@ -161,8 +161,8 @@ def scrape():
         temp_c = driver.find_element(By.ID, "tempC").text.strip()
         time_c = driver.find_element(By.ID, "timeC").text.strip()
         logout_el = driver.find_element(By.CSS_SELECTOR, "a[href='../index.php?logout=true'] span.gray")
-        common_data["tempC"] = temp_c
-        common_data["timeC"] = time_c.replace("Uhr", "").strip()
+        common_data["Aussentemperatur"] = temp_c
+        common_data["Uhrzeit"] = time_c.replace("Uhr", "").strip()
         print(f"Extracted common data: {common_data}", flush=True)
     except Exception as e:
         print(f"Error extracting common data: {e}", flush=True)
