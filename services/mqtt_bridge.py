@@ -223,18 +223,18 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
         "eb7000_aussentemperatur",
         "eb7000_fwe_kaltwasser_zirkulation",
         "eb7000_fwe_warmwasser",
-        "eb7000_fwe_eintritt_wärmetauscher",
+        "eb7000_fwe_eintritt_waermetauscher",
         "eb7000_hk1_vorlaufanforderung",
         "eb7000_hk1_vorlauftemperatur",
         "eb7000_hk1_rucklauf",
-        "eb7000_hk1_rücklauftemperatur",
+        "eb7000_hk1_ruecklauftemperatur",
         "eb7000_hk1_vorlauf",
         "eb7000_hk2_vorlaufanforderung",
         "eb7000_hk2_vorlauftemperatur",
-        "eb7000_hk2_rücklauftemperatur",
+        "eb7000_hk2_ruecklauftemperatur",
         "eb7000_hk3_vorlaufanforderung",
         "eb7000_hk3_vorlauftemperatur",
-        "eb7000_hk3_rücklauftemperatur",
+        "eb7000_hk3_ruecklauftemperatur",
         "eb7000_sp_fwe_niveau",
         "eb7000_sp_ht_niveau",
         "eb7000_sp_nt_niveau",
@@ -244,7 +244,7 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
 
     rename_overrides: Dict[str, str] = {
         "eb7000_fwe_zapfmenge_l_min": "EB7000 FWE Zapfmenge",
-        "eb7000_fwe_eintritt_wärmetauscher": "EB7000 FWE Eintritt Wärmetauscher",
+        "eb7000_fwe_eintritt_waermetauscher": "EB7000 FWE Eintritt Wärmetauscher",
     }
 
     unit_overrides: Dict[str, str] = {
@@ -256,19 +256,16 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
         # Vorlauf / Rücklauf / Vorlaufanforderung / Speicher / Warmwasser / Kaltwasser
         "eb7000_hk1_vorlauftemperatur": "mdi:thermometer-water",
         "eb7000_hk1_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk1_rücklauftemperatur": "mdi:thermometer-water",
         "eb7000_hk1_vorlaufanforderung": "mdi:thermometer-water",
         "eb7000_hk2_vorlauftemperatur": "mdi:thermometer-water",
         "eb7000_hk2_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk2_rücklauftemperatur": "mdi:thermometer-water",
         "eb7000_hk2_vorlaufanforderung": "mdi:thermometer-water",
         "eb7000_hk3_vorlauftemperatur": "mdi:thermometer-water",
         "eb7000_hk3_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk3_rücklauftemperatur": "mdi:thermometer-water",
         "eb7000_hk3_vorlaufanforderung": "mdi:thermometer-water",
         "eb7000_fwe_kaltwasser_zirkulation": "mdi:thermometer-water",
         "eb7000_fwe_warmwasser": "mdi:thermometer-water",
-        "eb7000_fwe_eintritt_wärmetauscher": "mdi:thermometer-water",
+        "eb7000_fwe_eintritt_waermetauscher": "mdi:thermometer-water",
         "eb7000_sp_fwe_niveau": "mdi:thermometer-water",
         "eb7000_sp_ht_niveau": "mdi:thermometer-water",
         "eb7000_sp_nt_niveau": "mdi:thermometer-water",
@@ -324,11 +321,22 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
     def _slugify(part: str) -> str:
         s = part.strip().lower()
         out_chars: List[str] = []
+        umlaut_map = {
+            "ä": "ae",
+            "ö": "oe",
+            "ü": "ue",
+            "ß": "ss",
+            "Ä": "Ae",
+            "Ö": "Oe",
+            "Ü": "Ue",
+        }
         for ch in s:
-            if ch.isalnum():
-                out_chars.append(ch)
-            else:
-                out_chars.append("_")
+            mapped = umlaut_map.get(ch, ch)
+            for mch in mapped:
+                if mch.isalnum():
+                    out_chars.append(mch)
+                else:
+                    out_chars.append("_")
         slug = "".join(out_chars).strip("_")
         while "__" in slug:
             slug = slug.replace("__", "_")
@@ -395,6 +403,22 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
     }
 
     for path, payload in aussentemp_sensor.items():
+        _pub(path, payload)
+
+    # Explicit sensor for FWE Eintritt Wärmetauscher
+    fwe_sensors: Dict[str, Dict[str, Any]] = {
+        "sensor/eb7000_fwe_eintritt_waermetauscher/config": {
+            "name": "EB7000 FWE Eintritt Wärmetauscher",
+            "state_topic": f"{base}/state",
+            "unit_of_measurement": "°C",
+            "value_template": "{{ value_json.fwe.Eintritt_Wärmetauscher }}",
+            "unique_id": "eb7000_fwe_eintritt_waermetauscher",
+            "icon": "mdi:thermometer-water",
+            "device": device,
+        }
+    }
+
+    for path, payload in fwe_sensors.items():
         _pub(path, payload)
 
     # Explicit sensors for HK1–HK3 Rücklauftemperatur
