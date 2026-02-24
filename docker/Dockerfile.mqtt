@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy dependencies and install them
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy EB7000 MQTT package and services
+COPY eb7000 /app/eb7000
+COPY services /app/services
+
+ENV MQTT_HOST=mosquitto \
+    MQTT_PORT=1883 \
+    MQTT_BASE_TOPIC=eb7000 \
+    EB7000_HOST=192.168.0.9 \
+    EB7000_PORT=502 \
+    POLL_INTERVAL=30
+
+CMD ["python", "-u", "-m", "services.mqtt_bridge"]
+
