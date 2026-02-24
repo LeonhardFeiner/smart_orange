@@ -12,6 +12,14 @@ services:
       - chromium
     environment:
       - SELENIUM_REMOTE_URL=http://chromium:4444/wd/hub
+      - MQTT_BROKER=mqtt://localhost
+      - MQTT_USERNAME=orange
+      - MQTT_PASSWORD=kV32LL3HQ1MN553QJHig
+      # - MQTT_CLIENT_ID=home-scraper
+      # - MQTT_TOPIC_DATA=home/scraper/data/latest
+      # - MQTT_TOPIC_COMMAND=home/scraper/commands/set_mode
+      - PUBLISH_INTERVAL=60
+
     ports:
       - "3005:3000"
     volumes:

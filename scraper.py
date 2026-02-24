@@ -1,42 +1,23 @@
 import os
+import threading
 import time
-from flask import Flask, jsonify, request
-import codecs
+import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
-from flask_httpauth import HTTPBasicAuth
+from paho.mqtt import Client as MqttClient
 
-app = Flask(__name__)
 SELENIUM_REMOTE_URL = os.getenv("SELENIUM_REMOTE_URL", "http://chromium:4444/wd/hub")
-
-
-auth = HTTPBasicAuth()
-
-USERNAME = os.getenv("API_USERNAME")
-PASSWORD = os.getenv("API_PASSWORD")
-
-def verify_password(username, password):
-    if USERNAME is None and PASSWORD is None:
-        # No credentials set, disable auth
-        return True
-    return username == USERNAME and password == PASSWORD
-
-auth.verify_password(verify_password)
-
-# Decorator to conditionally require authentication
-def conditional_auth(f):
-    def decorated(*args, **kwargs):
-        if USERNAME is None and PASSWORD is None:
-            # No auth required
-            return f(*args, **kwargs)
-        else:
-            return auth.login_required(f)(*args, **kwargs)
-    decorated.__name__ = f.__name__
-    return decorated
+MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt://localhost")
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+MQTT_CLIENT_ID = "home-scraper"
+MQTT_TOPIC_DATA = "home/scraper/data/latest"
+MQTT_TOPIC_COMMAND = "home/scraper/commands/set_mode"
+QUEUED_INTERVAL = int(os.getenv("PUBLISH_INTERVAL", "60")) # seconds
 
 
 def fix_mojibake(s):
@@ -216,89 +197,49 @@ def parse(result):
                 
     return new_result
 
-@app.route('/scrape', methods=['GET'])
-@conditional_auth
-def scrape_api():
-    result = scrape()
-    new_result = parse(result)
-    return jsonify(new_result)
 
-@app.route('/scrape_flat', methods=['GET'])
-@conditional_auth
-def scrape_flat_api():
-    result = scrape()
-    new_result = parse(result)
-    flat_result = {}
-    for page, page_data in new_result.items():
-        for key, value in page_data.items():
-            flat_key = f"{page} - {key}"
-            flat_result[flat_key] = value
-    return jsonify(flat_result)
+class MqttBridge:
+    def init(self):
+        self.client = MqttClient(MQTT_CLIENT_ID)
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+        self.connected = False
+        self.lock = threading.Lock()
 
-@app.route('/set_mode', methods=['POST'])
-@conditional_auth
-def set_mode():
-    req_data = request.get_json()
-    object_name = req_data.get("object_name")
-    mode_to_set = req_data.get("mode")
-    if not object_name or not mode_to_set:
-        return jsonify({"error": "object_name and mode are required"}), 400
+    def connect(self):
+        # If broker requires auth, provide username/password via username_pw_set
+        if MQTT_USERNAME and MQTT_PASSWORD:
+            self.client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+        self.client.connect("localhost", 1883, 60)  # adjust host/port as needed
+        self.client.loop_start()
 
-    driver = webdriver.Remote(command_executor=SELENIUM_REMOTE_URL, options=Options().headless())
+    def on_connect(self, client, userdata, flags, rc):
+        self.connected = True
+        print("MQTT connected", rc)
+
+    def on_disconnect(self, client, userdata, rc):
+        self.connected = False
+        print("MQTT disconnected", rc)
+
+    def publish(self, topic, payload):
+        with self.lock:
+            if self.connected:
+                self.client.publish(topic, json.dumps(payload))
+            else:
+                print("MQTT not connected, skip publish")
+
+def main_loop():
+    mqtt_bridge = MqttBridge()
+    mqtt_bridge.connect()
     try:
-        driver.get("http://192.168.0.9/")
-
-        # Get ControllerObjects from page
-        controller_objects = driver.execute_script("return window.ControllerObjects;")
-        # Find index for object_name
-        target_index = next((i for i, obj in enumerate(controller_objects) if obj.get('name') == object_name), None)
-        if target_index is None:
-            return jsonify({"error": "object_name not found"}), 404
-
-        # Set CurrentObjectIndex and load page via JS
-        driver.execute_script(f"window.CurrentObjectIndex = {target_index}; window.loadActualObjectData();")
-
-        # Wait for header to update
-        WebDriverWait(driver, 10).until(
-            lambda d: d.find_element(By.ID, "headerText").text.strip() == object_name
-        )
-
-        # Click current mode button to open modes
-        current_mode_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, 'div[id^="bObj_"][onclick^="clickMode"]'))
-        )
-        current_mode_btn.click()
-
-        # Wait for options
-        WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.CSS_SELECTOR, 'div[onclick^="setOperationMode"]'))
-        )
-
-        # Find and click the mode button matching requested mode
-        mode_buttons = driver.find_elements(By.CSS_SELECTOR, 'div[onclick^="setOperationMode"]')
-        for btn in mode_buttons:
-            text = btn.find_element(By.CSS_SELECTOR, 'div[class*="Text"]').text.strip()
-            if text.lower() == mode_to_set.lower():
-                btn.click()
-                break
-        else:
-            return jsonify({"error": "mode not found"}), 404
-
-        return jsonify({"status": "mode set"}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        while True:
+            result = scrape()
+            parsed = parse(result)
+            mqtt_bridge.publish(MQTT_TOPIC_DATA, parsed)
+            time.sleep(QUEUED_INTERVAL)
     finally:
-        driver.quit()
-
-
-@app.route('/scrape_raw', methods=['GET'])
-@conditional_auth
-def scrape_raw_api():
-    result = scrape()
-    return jsonify(result)
-
+        mqtt_bridge.client.loop_stop()
+        mqtt_bridge.client.disconnect()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3000)
+    main_loop()

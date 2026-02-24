@@ -1,3 +1,2 @@
 selenium
-flask
-flask-httpauth
+paho-mqtt
