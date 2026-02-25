@@ -309,10 +309,10 @@ def extract_fwe_values(words: List[int]) -> Dict[str, Any]:
     v4 = get_modbus_dec(words, 4, 1)
     v5 = get_modbus_dec(words, 5, 1)
     v6 = get_modbus_dec(words, 6, 1)
-    r["Kaltwasser_Zirkulation"] = (v3 / 10.0) if v3 is not None and v3 not in (3150, -3150) else None
+    r["Kaltwasser_&_Zirkulation"] = (v3 / 10.0) if v3 is not None and v3 not in (3150, -3150) else None
     r["Warmwasser"] = (v4 / 10.0) if v4 is not None and v4 not in (3150, -3150) else None
     r["Eintritt_Wärmetauscher"] = (v5 / 10.0) if v5 is not None and v5 not in (3150, -3150) else None
-    r["Zapfmenge_l_min"] = (v6 / 100.0) if v6 is not None and v6 not in (3150, -3150) else None
+    r["Zapfmenge"] = (v6 / 100.0) if v6 is not None and v6 not in (3150, -3150) else None
     mode = get_modbus_dec(words, 1, 1, signed=False)
     r["mode"] = mode
     r["mode_name"] = FWE_MODE_NAMES.get(mode, f"unknown({mode})") if mode is not None else None

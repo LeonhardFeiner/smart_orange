@@ -256,7 +256,7 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
         ("sp", "nt_niveau"): (watertemp, None),
         ("sp", "sp_unten"): (watertemp, None),
         # Zapfmenge (flow)
-        ("fwe", "zapfmenge_l_min"): (waterflow, "zapfmenge"),
+        ("fwe", "zapfmenge"): (waterflow, None),
         # Betriebstemperatur + Außentemperatur
         ("wq", "betriebstemperatur"): (othertemp, None),
         ("sp", "aussentemperatur"): (othertemp, None),
@@ -312,6 +312,7 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
             "Ä": "Ae",
             "Ö": "Oe",
             "Ü": "Ue",
+            "&": "_",
         }
         for ch in s:
             mapped = umlaut_map.get(ch, ch)
