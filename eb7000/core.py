@@ -223,6 +223,21 @@ def set_hk_mode_std(hk: int, mode: int, urlaub_days: Optional[int] = None, host:
         return resp is not None and len(resp) >= 8 and resp[7] == 0x06
 
 
+def build_hk_urlaub_fc4c_hex(hk: int, urlaub_days: int) -> Optional[str]:
+    """
+    Build the raw FC4C Modbus frame (in hex) used by the original web UI
+    when setting Urlaub for a given heating circuit.
+
+    This is intended for debugging/logging purposes only.
+    """
+    addrs = {1: ("50", "2800"), 2: ("50", "3000"), 3: ("11", "2000")}
+    if hk not in addrs:
+        return None
+    unit_hex, addr_hex = addrs[hk]
+    days_hex = f"{urlaub_days:04x}"
+    return f"00010000000b{unit_hex}4c{addr_hex}0002040003{days_hex}"
+
+
 def extract_sp_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 11:
         return {"error": "insufficient data"}
@@ -451,6 +466,6 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
     return result
 
 
-__all__ = ["read_all_web_ui_values", "set_hk_mode", "set_fwe_mode"]
+__all__ = ["read_all_web_ui_values", "set_hk_mode", "set_fwe_mode", "build_hk_urlaub_fc4c_hex"]
 
 

@@ -24,6 +24,7 @@ from eb7000.core import (
     set_hk_mode_std,
     HK_MODE_NAMES,
     FWE_MODE_NAMES,
+    build_hk_urlaub_fc4c_hex,
 )
 
 
@@ -100,11 +101,8 @@ def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> No
 
         # Debug: publish the exact web-ui-like FC4C frame for Urlaub
         if mode == 3 and urlaub_days is not None:
-            unit_hex = {1: "50", 2: "50", 3: "11"}.get(hk_num)
-            addr_hex = {1: "2800", 2: "3000", 3: "2000"}.get(hk_num)
-            if unit_hex and addr_hex:
-                days_hex = f"{urlaub_days:04x}"
-                hex_cmd = f"00010000000b{unit_hex}4c{addr_hex}0002040003{days_hex}"
+            hex_cmd = build_hk_urlaub_fc4c_hex(hk_num, urlaub_days)
+            if hex_cmd is not None:
                 client.publish(f"{base}/debug/last_hk{hk_num}_urlaub_fc4c_hex", hex_cmd, qos=1, retain=True)
 
         ok = set_hk_mode(hk_num, mode, urlaub_days=urlaub_days, host=EB7000_HOST, port=EB7000_PORT)
