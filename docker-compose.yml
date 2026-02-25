@@ -18,6 +18,7 @@ services:
       MQTT_DISCOVERY_PREFIX: "homeassistant" # change only if you customized HA's prefix
       MQTT_USERNAME: "orange"
       MQTT_PASSWORD: "kV32LL3HQ1MN553QJHig"
+      SENSOR_PREFIX: ""
     networks:
       - mqtt_net
 

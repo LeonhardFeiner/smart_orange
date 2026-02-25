@@ -40,6 +40,18 @@ MQTT_DISCOVERY_ENABLE = os.getenv("MQTT_DISCOVERY_ENABLE", "true").lower() in ("
 EB7000_HOST = os.getenv("EB7000_HOST", "192.168.0.9")
 EB7000_PORT = int(os.getenv("EB7000_PORT", "502"))
 
+# Base name used by Home Assistant when building sensor entity_ids, via device name.
+# Example: sensor.{EB7000_ENTITY_BASENAME}_fwe_eintritt_waermetauscher
+EB7000_ENTITY_BASENAME = os.getenv("EB7000_ENTITY_BASENAME", "EB7000 Heating Controller")
+ID_PREFIX = os.getenv("ID_PREFIX", "eb7000")
+SENSOR_PREFIX = os.getenv("SENSOR_PREFIX", "EB7000")
+
+if len(ID_PREFIX) > 0 and not ID_PREFIX.endswith("_"):
+    ID_PREFIX += "_"
+
+if len(SENSOR_PREFIX) > 0 and not SENSOR_PREFIX.endswith(" "):
+    SENSOR_PREFIX += " "
+
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))
 
 _discovery_done = False
@@ -193,7 +205,7 @@ def publish_state(client: mqtt.Client) -> None:
 def _device_info() -> Dict[str, Any]:
     return {
         "identifiers": ["eb7000"],
-        "name": "EB7000 Heating Controller",
+        "name": EB7000_ENTITY_BASENAME,
         "manufacturer": "EBM",
         "model": "EB7000",
     }
@@ -227,66 +239,66 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
 
     sensor_overrides: Dict[str, Dict[str, Any]] = {
         # Vorlauf / Rücklauf / Vorlaufanforderung / Speicher / Warmwasser / Kaltwasser
-        "eb7000_hk1_vorlauftemperatur": watertemp,
-        "eb7000_hk1_ruecklauftemperatur": watertemp,
-        "eb7000_hk1_vorlaufanforderung": watertemp,
-        "eb7000_hk2_vorlauftemperatur": watertemp,
-        "eb7000_hk2_ruecklauftemperatur": watertemp,
-        "eb7000_hk2_vorlaufanforderung": watertemp,
-        "eb7000_hk3_vorlauftemperatur": watertemp,
-        "eb7000_hk3_ruecklauftemperatur": watertemp,
-        "eb7000_hk3_vorlaufanforderung": watertemp,
-        "eb7000_fwe_kaltwasser_zirkulation": watertemp,
-        "eb7000_fwe_warmwasser": watertemp,
-        "eb7000_fwe_eintritt_waermetauscher": watertemp,
-        "eb7000_sp_fwe_niveau": watertemp,
-        "eb7000_sp_ht_niveau": watertemp,
-        "eb7000_sp_nt_niveau": watertemp,
-        "eb7000_sp_sp_unten": watertemp,
+        ("hk1", "vorlauftemperatur"): (watertemp, None),
+        ("hk1", "ruecklauftemperatur"): (watertemp, None),
+        ("hk1", "vorlaufanforderung"): (watertemp, None),
+        ("hk2", "vorlauftemperatur"): (watertemp, None),
+        ("hk2", "ruecklauftemperatur"): (watertemp, None),
+        ("hk2", "vorlaufanforderung"): (watertemp, None),
+        ("hk3", "vorlauftemperatur"): (watertemp, None),
+        ("hk3", "ruecklauftemperatur"): (watertemp, None),
+        ("hk3", "vorlaufanforderung"): (watertemp, None),
+        ("fwe", "kaltwasser_zirkulation"): (watertemp, None),
+        ("fwe", "warmwasser"): (watertemp, None),
+        ("fwe", "eintritt_waermetauscher"): (watertemp, None),
+        ("sp", "fwe_niveau"): (watertemp, None),
+        ("sp", "ht_niveau"): (watertemp, None),
+        ("sp", "nt_niveau"): (watertemp, None),
+        ("sp", "sp_unten"): (watertemp, None),
         # Zapfmenge (flow)
-        "eb7000_fwe_zapfmenge_l_min": {**waterflow, "name": "eb7000_fwe_zapfmenge"},
+        ("fwe", "zapfmenge_l_min"): (waterflow, "zapfmenge"),
         # Betriebstemperatur + Außentemperatur
-        "eb7000_wq_betriebstemperatur": othertemp,
-        "eb7000_sp_aussentemperatur": othertemp,
+        ("wq", "betriebstemperatur"): (othertemp, None),
+        ("sp", "aussentemperatur"): (othertemp, None),
         # Sensors we want to skip entirely from auto-generation
-        "eb7000_hk3_pause": skip,
-        "eb7000_hk2_pause": skip,
-        "eb7000_hk1_pause": skip,
-        "eb7000_ak_eb1000_count": skip,
-        "eb7000_ak_eb4000_count": skip,
-        "eb7000_ak_rbm8_count": skip,
-        "eb7000_ak_wp_exist": skip,
-        "eb7000_ak_wp_typ": skip,
-        "eb7000_hk2_mode": skip,
-        "eb7000_hk1_mode": skip,
-        "eb7000_hk1_name_control_hi": skip,
-        "eb7000_hk1_name_control_lo": skip,
-        "eb7000_hk1_status_bits_word0": skip,
-        "eb7000_hk1_status_bits_word8": skip,
-        "eb7000_hk2_name_control_hi": skip,
-        "eb7000_hk2_name_control_lo": skip,
-        "eb7000_hk3_mode": skip,
-        "eb7000_hk3_status_bits_word0": skip,
-        "eb7000_hk3_status_bits_word8": skip,
-        "eb7000_hk2_status_bits_word0": skip,
-        "eb7000_hk2_status_bits_word8": skip,
-        "eb7000_sk_kalttemperatur": skip,
-        "eb7000_sk_kollektortemperatur_f1": skip,
-        "eb7000_sk_leistung_kw": skip,
-        "eb7000_sk_name_control_hi": skip,
-        "eb7000_sk_name_control_lo": skip,
-        "eb7000_sk_nutztemperatur": skip,
-        "eb7000_sk_solardurchfluss": skip,
-        "eb7000_sk_warmtemperatur": skip,
-        "eb7000_sp_name_control_hi": skip,
-        "eb7000_sp_name_control_lo": skip,
-        "eb7000_wpint_name_control_hi": skip,
-        "eb7000_wpint_name_control_lo": skip,
-        "eb7000_wq_name_control_hi": skip,
-        "eb7000_wq_name_control_lo": skip,
-        "eb7000_fwe_mode": skip,
-        "eb7000_fwe_name_control_hi": skip,
-        "eb7000_fwe_name_control_lo": skip,
+        ("hk3", "pause"): skip,
+        ("hk2", "pause"): skip,
+        ("hk1", "pause"): skip,
+        ("ak", "eb1000_count"): skip,
+        ("ak", "eb4000_count"): skip,
+        ("ak", "rbm8_count"): skip,
+        ("ak", "wp_exist"): skip,
+        ("ak", "wp_typ"): skip,
+        ("hk2", "mode"): skip,
+        ("hk1", "mode"): skip,
+        ("hk1", "name_control_hi"): skip,
+        ("hk1", "name_control_lo"): skip,
+        ("hk1", "status_bits_word0"): skip,
+        ("hk1", "status_bits_word8"): skip,
+        ("hk2", "name_control_hi"): skip,
+        ("hk2", "name_control_lo"): skip,
+        ("hk3", "mode"): skip,
+        ("hk3", "status_bits_word0"): skip,
+        ("hk3", "status_bits_word8"): skip,
+        ("hk2", "status_bits_word0"): skip,
+        ("hk2", "status_bits_word8"): skip,
+        ("sk", "kalttemperatur"): skip,
+        ("sk", "kollektortemperatur_f1"): skip,
+        ("sk", "leistung_kw"): skip,
+        ("sk", "name_control_hi"): skip,
+        ("sk", "name_control_lo"): skip,
+        ("sk", "nutztemperatur"): skip,
+        ("sk", "solardurchfluss"): skip,
+        ("sk", "warmtemperatur"): skip,
+        ("sp", "name_control_hi"): skip,
+        ("sp", "name_control_lo"): skip,
+        ("wpint", "name_control_hi"): skip,
+        ("wpint", "name_control_lo"): skip,
+        ("wq", "name_control_hi"): skip,
+        ("wq", "name_control_lo"): skip,
+        ("fwe", "mode"): skip,
+        ("fwe", "name_control_hi"): skip,
+        ("fwe", "name_control_lo"): skip,
     }
 
     def _slugify(part: str) -> str:
@@ -326,15 +338,21 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
         for path in _iter_numeric_paths([], example_state):
             if not path:
                 continue
-            # Build unique_id and a human-friendly name
-            slug_parts = [_slugify(p) for p in path]
-            unique_id = "eb7000_" + "_".join(slug_parts)
-
-            meta = sensor_overrides.get(unique_id, {})
-            if meta is None:
+            # Build unique_id and look up per-sensor metadata
+            slug_parts = tuple(_slugify(p) for p in path)
+            meta_new_name = sensor_overrides.get(slug_parts, None)
+            if meta_new_name is None:
                 continue
+            meta, new_name = meta_new_name
 
-            name = "EB7000 " + " / ".join(path)
+            unique_id = ID_PREFIX + "_".join(slug_parts)
+
+            first_part, *other_parts = path
+            if new_name is not None:
+                other_parts = [new_name]
+
+            secondary_name = " ".join(p.replace("_", " ").title() for p in other_parts)
+            name = SENSOR_PREFIX + first_part.upper() + " " + secondary_name
 
             # Build Jinja2 value_template using dict-style access to be robust to umlauts
             path_expr = "".join(f'["{p}"]' for p in path)
@@ -349,29 +367,28 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
                 **meta,
             }
 
-
             _pub(f"sensor/{unique_id}/config", payload)
 
 
     # Mode selects for HK1–HK3 and FWE
     selects: Dict[str, Dict[str, Any]] = {
-        "select/eb7000_fwe_mode/config": {
-            "name": "EB7000 FWE Modus",
+        f"select/{ID_PREFIX}fwe_mode/config": {
+            "name": f"{SENSOR_PREFIX}FWE Modus",
             "state_topic": f"{base}/fwe/mode_name",
             "command_topic": f"{base}/cmd/fwe/mode",
             "value_template": "{{ value }}",
             "options": ["Automatik", "Spar"],
-            "unique_id": "eb7000_fwe_mode",
+            "unique_id": f"{ID_PREFIX}fwe_mode",
             "device": device,
         },
         **{
-            f"select/eb7000_hk{hk_id}_mode/config": {
-                "name": f"EB7000 HK{hk_id} Modus",
+            f"select/{ID_PREFIX}hk{hk_id}_mode/config": {
+                "name": f"{SENSOR_PREFIX}HK{hk_id} Modus",
                 "state_topic": f"{base}/hk{hk_id}/mode_name",
                 "command_topic": f"{base}/cmd/hk/{hk_id}/mode",
                 "value_template": "{{ value }}",
                 "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
-                "unique_id": f"eb7000_hk{hk_id}_mode",
+                "unique_id": f"{ID_PREFIX}hk{hk_id}_mode",
                 "device": device,
             } for hk_id in range(1, 4)
         }
@@ -382,8 +399,8 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
 
     # Urlaub days numbers for HK1–HK3
     numbers: Dict[str, Dict[str, Any]] = {
-        f"number/eb7000_hk{hk_id}_urlaub_days/config": {
-            "name": f"EB7000 HK{hk_id} Urlaubstage",
+        f"number/{ID_PREFIX}_hk{hk_id}_urlaub_days/config": {
+            "name": f"{SENSOR_PREFIX}HK{hk_id} Urlaubstage",
             "state_topic": f"{base}/hk{hk_id}/urlaub_days",
             "command_topic": f"{base}/cmd/hk/{hk_id}/urlaub_days",
             "min": 1,
@@ -391,7 +408,7 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
             "step": 1,
             "mode": "box",
             "unit_of_measurement": "d",
-            "unique_id": f"eb7000_hk{hk_id}_urlaub_days",
+            "unique_id": f"{ID_PREFIX}_hk{hk_id}_urlaub_days",
             "device": device,
         } for hk_id in range(1, 4)
     }
