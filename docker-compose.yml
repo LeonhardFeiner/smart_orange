@@ -19,6 +19,7 @@ services:
       MQTT_USERNAME: "orange"
       MQTT_PASSWORD: "kV32LL3HQ1MN553QJHig"
       SENSOR_PREFIX: ""
+      EB7000_ENTITY_BASENAME: "O3 EB7000"
     networks:
       - mqtt_net
 
