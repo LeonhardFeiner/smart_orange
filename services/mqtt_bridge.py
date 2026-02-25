@@ -218,104 +218,77 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
         topic = f"{prefix}/{path}"
         client.publish(topic, json.dumps(payload), qos=1, retain=True)
 
-    # Discovery overrides: units, names, and sensors to skip completely.
-    temp_sensor_ids = {
-        "eb7000_aussentemperatur",
-        "eb7000_fwe_kaltwasser_zirkulation",
-        "eb7000_fwe_warmwasser",
-        "eb7000_fwe_eintritt_waermetauscher",
-        "eb7000_hk1_vorlaufanforderung",
-        "eb7000_hk1_vorlauftemperatur",
-        "eb7000_hk1_rucklauf",
-        "eb7000_hk1_ruecklauftemperatur",
-        "eb7000_hk1_vorlauf",
-        "eb7000_hk2_vorlaufanforderung",
-        "eb7000_hk2_vorlauftemperatur",
-        "eb7000_hk2_ruecklauftemperatur",
-        "eb7000_hk3_vorlaufanforderung",
-        "eb7000_hk3_vorlauftemperatur",
-        "eb7000_hk3_ruecklauftemperatur",
-        "eb7000_sp_fwe_niveau",
-        "eb7000_sp_ht_niveau",
-        "eb7000_sp_nt_niveau",
-        "eb7000_sp_sp_unten",
-        "eb7000_wq_betriebstemperatur",
-    }
 
-    rename_overrides: Dict[str, str] = {
-        "eb7000_fwe_zapfmenge_l_min": "EB7000 FWE Zapfmenge",
-        "eb7000_fwe_eintritt_waermetauscher": "EB7000 FWE Eintritt Wärmetauscher",
-    }
+    # Combined per-sensor metadata:
+    # - "unit": unit_of_measurement
+    # - "icon": Home Assistant icon
+    watertemp: Dict[str, Any] = {"unit_of_measurement": "°C", "icon": "mdi:thermometer-water"}
+    waterflow: Dict[str, Any] = {"unit_of_measurement": "l/min", "icon": "mdi:water-pump"}
+    othertemp: Dict[str, Any] = {"unit_of_measurement": "°C", "icon": "mdi:thermometer"}
+    skip: Dict[str, Any] = None
 
-    unit_overrides: Dict[str, str] = {
-        "eb7000_fwe_zapfmenge_l_min": "l/min",
-    }
-
-    # Icon overrides for Home Assistant discovery
-    icon_overrides: Dict[str, str] = {
+    sensor_overrides: Dict[str, Dict[str, Any]] = {
         # Vorlauf / Rücklauf / Vorlaufanforderung / Speicher / Warmwasser / Kaltwasser
-        "eb7000_hk1_vorlauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk1_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk1_vorlaufanforderung": "mdi:thermometer-water",
-        "eb7000_hk2_vorlauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk2_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk2_vorlaufanforderung": "mdi:thermometer-water",
-        "eb7000_hk3_vorlauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk3_ruecklauftemperatur": "mdi:thermometer-water",
-        "eb7000_hk3_vorlaufanforderung": "mdi:thermometer-water",
-        "eb7000_fwe_kaltwasser_zirkulation": "mdi:thermometer-water",
-        "eb7000_fwe_warmwasser": "mdi:thermometer-water",
-        "eb7000_fwe_eintritt_waermetauscher": "mdi:thermometer-water",
-        "eb7000_sp_fwe_niveau": "mdi:thermometer-water",
-        "eb7000_sp_ht_niveau": "mdi:thermometer-water",
-        "eb7000_sp_nt_niveau": "mdi:thermometer-water",
-        "eb7000_sp_sp_unten": "mdi:thermometer-water",
+        "eb7000_hk1_vorlauftemperatur": watertemp,
+        "eb7000_hk1_ruecklauftemperatur": watertemp,
+        "eb7000_hk1_vorlaufanforderung": watertemp,
+        "eb7000_hk2_vorlauftemperatur": watertemp,
+        "eb7000_hk2_ruecklauftemperatur": watertemp,
+        "eb7000_hk2_vorlaufanforderung": watertemp,
+        "eb7000_hk3_vorlauftemperatur": watertemp,
+        "eb7000_hk3_ruecklauftemperatur": watertemp,
+        "eb7000_hk3_vorlaufanforderung": watertemp,
+        "eb7000_fwe_kaltwasser_zirkulation": watertemp,
+        "eb7000_fwe_warmwasser": watertemp,
+        "eb7000_fwe_eintritt_waermetauscher": watertemp,
+        "eb7000_sp_fwe_niveau": watertemp,
+        "eb7000_sp_ht_niveau": watertemp,
+        "eb7000_sp_nt_niveau": watertemp,
+        "eb7000_sp_sp_unten": watertemp,
         # Zapfmenge (flow)
-        "eb7000_fwe_zapfmenge_l_min": "mdi:water-pump",
+        "eb7000_fwe_zapfmenge_l_min": {**waterflow, "name": "eb7000_fwe_zapfmenge"},
         # Betriebstemperatur + Außentemperatur
-        "eb7000_wq_betriebstemperatur": "mdi:thermometer",
-        "eb7000_ausstemperatur": "mdi:thermometer",
-    }
-
-    skip_unique_ids = {
-        "eb7000_hk3_pause",
-        "eb7000_hk2_pause",
-        "eb7000_hk1_pause",
-        "eb7000_ak_eb1000_count",
-        "eb7000_ak_eb4000_count",
-        "eb7000_ak_rbm8_count",
-        "eb7000_ak_wp_exist",
-        "eb7000_ak_wp_typ",
-        "eb7000_hk2_mode",
-        "eb7000_hk1_mode",
-        "eb7000_hk1_name_control_hi",
-        "eb7000_hk1_name_control_lo",
-        "eb7000_hk1_status_bits_word0",
-        "eb7000_hk1_status_bits_word8",
-        "eb7000_hk2_name_control_hi",
-        "eb7000_hk2_name_control_lo",
-        "eb7000_hk3_mode",
-        "eb7000_hk3_status_bits_word0",
-        "eb7000_hk3_status_bits_word8",
-        "eb7000_hk2_status_bits_word0",
-        "eb7000_hk2_status_bits_word8",
-        "eb7000_sk_kalttemperatur",
-        "eb7000_sk_kollektortemperatur_f1",
-        "eb7000_sk_leistung_kw",
-        "eb7000_sk_name_control_hi",
-        "eb7000_sk_name_control_lo",
-        "eb7000_sk_nutztemperatur",
-        "eb7000_sk_solardurchfluss",
-        "eb7000_sk_warmtemperatur",
-        "eb7000_sp_name_control_hi",
-        "eb7000_sp_name_control_lo",
-        "eb7000_wpint_name_control_hi",
-        "eb7000_wpint_name_control_lo",
-        "eb7000_wq_name_control_hi",
-        "eb7000_wq_name_control_lo",
-        "eb7000_fwe_mode",
-        "eb7000_fwe_name_control_hi",
-        "eb7000_fwe_name_control_lo",
+        "eb7000_wq_betriebstemperatur": othertemp,
+        "eb7000_sp_aussentemperatur": othertemp,
+        # Sensors we want to skip entirely from auto-generation
+        "eb7000_hk3_pause": skip,
+        "eb7000_hk2_pause": skip,
+        "eb7000_hk1_pause": skip,
+        "eb7000_ak_eb1000_count": skip,
+        "eb7000_ak_eb4000_count": skip,
+        "eb7000_ak_rbm8_count": skip,
+        "eb7000_ak_wp_exist": skip,
+        "eb7000_ak_wp_typ": skip,
+        "eb7000_hk2_mode": skip,
+        "eb7000_hk1_mode": skip,
+        "eb7000_hk1_name_control_hi": skip,
+        "eb7000_hk1_name_control_lo": skip,
+        "eb7000_hk1_status_bits_word0": skip,
+        "eb7000_hk1_status_bits_word8": skip,
+        "eb7000_hk2_name_control_hi": skip,
+        "eb7000_hk2_name_control_lo": skip,
+        "eb7000_hk3_mode": skip,
+        "eb7000_hk3_status_bits_word0": skip,
+        "eb7000_hk3_status_bits_word8": skip,
+        "eb7000_hk2_status_bits_word0": skip,
+        "eb7000_hk2_status_bits_word8": skip,
+        "eb7000_sk_kalttemperatur": skip,
+        "eb7000_sk_kollektortemperatur_f1": skip,
+        "eb7000_sk_leistung_kw": skip,
+        "eb7000_sk_name_control_hi": skip,
+        "eb7000_sk_name_control_lo": skip,
+        "eb7000_sk_nutztemperatur": skip,
+        "eb7000_sk_solardurchfluss": skip,
+        "eb7000_sk_warmtemperatur": skip,
+        "eb7000_sp_name_control_hi": skip,
+        "eb7000_sp_name_control_lo": skip,
+        "eb7000_wpint_name_control_hi": skip,
+        "eb7000_wpint_name_control_lo": skip,
+        "eb7000_wq_name_control_hi": skip,
+        "eb7000_wq_name_control_lo": skip,
+        "eb7000_fwe_mode": skip,
+        "eb7000_fwe_name_control_hi": skip,
+        "eb7000_fwe_name_control_lo": skip,
     }
 
     def _slugify(part: str) -> str:
@@ -359,8 +332,8 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
             slug_parts = [_slugify(p) for p in path]
             unique_id = "eb7000_" + "_".join(slug_parts)
 
-            # Skip unwanted sensors entirely
-            if unique_id in skip_unique_ids:
+            meta = sensor_overrides.get(unique_id, {})
+            if meta is None:
                 continue
 
             name = "EB7000 " + " / ".join(path)
@@ -375,115 +348,15 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
                 "value_template": value_template,
                 "unique_id": unique_id,
                 "device": device,
+                **meta,
             }
 
-            # Apply overrides for units and names
-            if unique_id in temp_sensor_ids:
-                payload["unit_of_measurement"] = "°C"
-            if unique_id in unit_overrides:
-                payload["unit_of_measurement"] = unit_overrides[unique_id]
-            if unique_id in rename_overrides:
-                payload["name"] = rename_overrides[unique_id]
-            if unique_id in icon_overrides:
-                payload["icon"] = icon_overrides[unique_id]
 
             _pub(f"sensor/{unique_id}/config", payload)
 
-    # Explicit sensor for Außentemperatur
-    aussentemp_sensor = {
-        "sensor/eb7000_ausstemperatur/config": {
-            "name": "EB7000 Außentemperatur",
-            "state_topic": f"{base}/state",
-            "unit_of_measurement": "°C",
-            "value_template": "{{ value_json.sp.Außentemperatur }}",
-            "unique_id": "eb7000_ausstemperatur",
-            "icon": "mdi:thermometer",
-            "device": device,
-        }
-    }
-
-    for path, payload in aussentemp_sensor.items():
-        _pub(path, payload)
-
-    # Explicit sensor for FWE Eintritt Wärmetauscher
-    fwe_sensors: Dict[str, Dict[str, Any]] = {
-        "sensor/eb7000_fwe_eintritt_waermetauscher/config": {
-            "name": "EB7000 FWE Eintritt Wärmetauscher",
-            "state_topic": f"{base}/state",
-            "unit_of_measurement": "°C",
-            "value_template": "{{ value_json.fwe.Eintritt_Wärmetauscher }}",
-            "unique_id": "eb7000_fwe_eintritt_waermetauscher",
-            "icon": "mdi:thermometer-water",
-            "device": device,
-        }
-    }
-
-    for path, payload in fwe_sensors.items():
-        _pub(path, payload)
-
-    # Explicit sensors for HK1–HK3 Rücklauftemperatur
-    rueck_sensors: Dict[str, Dict[str, Any]] = {
-        "sensor/eb7000_hk1_ruecklauftemperatur/config": {
-            "name": "EB7000 HK1 Rücklauftemperatur",
-            "state_topic": f"{base}/state",
-            "unit_of_measurement": "°C",
-            "value_template": "{{ value_json.hk1.Rücklauftemperatur }}",
-            "unique_id": "eb7000_hk1_ruecklauftemperatur",
-            "icon": "mdi:thermometer-water",
-            "device": device,
-        },
-        "sensor/eb7000_hk2_ruecklauftemperatur/config": {
-            "name": "EB7000 HK2 Rücklauftemperatur",
-            "state_topic": f"{base}/state",
-            "unit_of_measurement": "°C",
-            "value_template": "{{ value_json.hk2.Rücklauftemperatur }}",
-            "unique_id": "eb7000_hk2_ruecklauftemperatur",
-            "icon": "mdi:thermometer-water",
-            "device": device,
-        },
-        "sensor/eb7000_hk3_ruecklauftemperatur/config": {
-            "name": "EB7000 HK3 Rücklauftemperatur",
-            "state_topic": f"{base}/state",
-            "unit_of_measurement": "°C",
-            "value_template": "{{ value_json.hk3.Rücklauftemperatur }}",
-            "unique_id": "eb7000_hk3_ruecklauftemperatur",
-            "icon": "mdi:thermometer-water",
-            "device": device,
-        },
-    }
-
-    for path, payload in rueck_sensors.items():
-        _pub(path, payload)
 
     # Mode selects for HK1–HK3 and FWE
     selects: Dict[str, Dict[str, Any]] = {
-        "select/eb7000_hk1_mode/config": {
-            "name": "EB7000 HK1 Modus",
-            "state_topic": f"{base}/hk1/mode_name",
-            "command_topic": f"{base}/cmd/hk/1/mode",
-            "value_template": "{{ value }}",
-            "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
-            "unique_id": "eb7000_hk1_mode",
-            "device": device,
-        },
-        "select/eb7000_hk2_mode/config": {
-            "name": "EB7000 HK2 Modus",
-            "state_topic": f"{base}/hk2/mode_name",
-            "command_topic": f"{base}/cmd/hk/2/mode",
-            "value_template": "{{ value }}",
-            "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
-            "unique_id": "eb7000_hk2_mode",
-            "device": device,
-        },
-        "select/eb7000_hk3_mode/config": {
-            "name": "EB7000 HK3 Modus",
-            "state_topic": f"{base}/hk3/mode_name",
-            "command_topic": f"{base}/cmd/hk/3/mode",
-            "value_template": "{{ value }}",
-            "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
-            "unique_id": "eb7000_hk3_mode",
-            "device": device,
-        },
         "select/eb7000_fwe_mode/config": {
             "name": "EB7000 FWE Modus",
             "state_topic": f"{base}/fwe/mode_name",
@@ -493,6 +366,17 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
             "unique_id": "eb7000_fwe_mode",
             "device": device,
         },
+        **{
+            f"select/eb7000_hk{hk_id}_mode/config": {
+                "name": f"EB7000 HK{hk_id} Modus",
+                "state_topic": f"{base}/hk{hk_id}/mode_name",
+                "command_topic": f"{base}/cmd/hk/{hk_id}/mode",
+                "value_template": "{{ value }}",
+                "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
+                "unique_id": f"eb7000_hk{hk_id}_mode",
+                "device": device,
+            } for hk_id in range(1, 4)
+        }
     }
 
     for path, payload in selects.items():
@@ -500,42 +384,18 @@ def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> Non
 
     # Urlaub days numbers for HK1–HK3
     numbers: Dict[str, Dict[str, Any]] = {
-        "number/eb7000_hk1_urlaub_days/config": {
-            "name": "EB7000 HK1 Urlaubstage",
-            "state_topic": f"{base}/hk1/urlaub_days",
-            "command_topic": f"{base}/cmd/hk/1/urlaub_days",
+        f"number/eb7000_hk{hk_id}_urlaub_days/config": {
+            "name": f"EB7000 HK{hk_id} Urlaubstage",
+            "state_topic": f"{base}/hk{hk_id}/urlaub_days",
+            "command_topic": f"{base}/cmd/hk/{hk_id}/urlaub_days",
             "min": 1,
             "max": 365,
             "step": 1,
             "mode": "box",
             "unit_of_measurement": "d",
-            "unique_id": "eb7000_hk1_urlaub_days",
+            "unique_id": f"eb7000_hk{hk_id}_urlaub_days",
             "device": device,
-        },
-        "number/eb7000_hk2_urlaub_days/config": {
-            "name": "EB7000 HK2 Urlaubstage",
-            "state_topic": f"{base}/hk2/urlaub_days",
-            "command_topic": f"{base}/cmd/hk/2/urlaub_days",
-            "min": 1,
-            "max": 365,
-            "step": 1,
-            "mode": "box",
-            "unit_of_measurement": "d",
-            "unique_id": "eb7000_hk2_urlaub_days",
-            "device": device,
-        },
-        "number/eb7000_hk3_urlaub_days/config": {
-            "name": "EB7000 HK3 Urlaubstage",
-            "state_topic": f"{base}/hk3/urlaub_days",
-            "command_topic": f"{base}/cmd/hk/3/urlaub_days",
-            "min": 1,
-            "max": 365,
-            "step": 1,
-            "mode": "box",
-            "unit_of_measurement": "d",
-            "unique_id": "eb7000_hk3_urlaub_days",
-            "device": device,
-        },
+        } for hk_id in range(1, 4)
     }
 
     for path, payload in numbers.items():
