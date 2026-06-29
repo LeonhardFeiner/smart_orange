@@ -244,7 +244,7 @@ def extract_sp_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
     for i, key in enumerate(["FWE_Niveau", "HT_Niveau", "NT_Niveau", "SP_unten"]):
         v = get_modbus_dec(words, 2 + i, 1)
-        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     out = get_modbus_dec(words, 10, 1)
     r["Außentemperatur"] = (out / 10.0) if out is not None and out != -3150 else None
     return r
@@ -291,7 +291,7 @@ def extract_hk_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
     for i, key in enumerate(["Vorlauftemperatur", "Rücklauftemperatur", "Vorlaufanforderung"]):
         v = get_modbus_dec(words, 3 + i, 1)
-        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     r["Pause"] = get_modbus_dec(words, 7, 1, signed=False)
     r["status_bits_word0"] = get_modbus_dec(words, 0, 1, signed=False)
     r["status_bits_word8"] = get_modbus_dec(words, 8, 1, signed=False)
@@ -330,7 +330,7 @@ def extract_sk_values(words: List[int]) -> Dict[str, Any]:
         if i == 4:
             r[key] = (v / 100.0) if v is not None else None
         else:
-            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     low = get_modbus_dec(words, 7, 1, signed=False) or 0
     high = get_modbus_dec(words, 8, 1, signed=False) or 0
     r["Leistung_kW"] = (low + high * 65535) / 1000.0
@@ -343,7 +343,7 @@ def extract_wq_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
     for i, key in enumerate(["Betriebstemperatur", "Rücklauftemperatur"]):
         v = get_modbus_dec(words, 1 + i, 1)
-        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     return r
 
 
@@ -353,7 +353,7 @@ def extract_wpint_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
     for i, key in enumerate(["Vorlauftemperatur", "SoleKalt", "KühlspeicherOben", "KühlspeicherUnten"]):
         v = get_modbus_dec(words, 1 + i, 1)
-        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     return r
 
 
@@ -363,7 +363,7 @@ def extract_wpsiem_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
     for i, key in enumerate(["Vorlauftemperatur", "Rücklauftemperatur", "Quellenaustritt", "Quelleneintritt", "KühlspeicherUnten"]):
         v = get_modbus_dec(words, 5 + i, 1)
-        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     return r
 
 
@@ -372,13 +372,13 @@ def extract_wp4000_values(words: List[int]) -> Dict[str, Any]:
     for i, key in enumerate(["Abtau", "QuellenEIN", "QuellenAUS"]):
         if len(words) > 12 + i:
             v = get_modbus_dec(words, 12 + i, 1)
-            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
         else:
             r[key] = None
     for i, key in enumerate(["WP_Vorlauf", "WP_Rücklauf"]):
         if len(words) > 21 + i:
             v = get_modbus_dec(words, 21 + i, 1)
-            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
         else:
             r[key] = None
     return r
@@ -579,6 +579,7 @@ __all__ = [
     "read_all_web_ui_values",
     "detect_present_objects",
     "set_hk_mode",
+    "set_hk_mode_std",
     "set_fwe_mode",
     "build_hk_urlaub_fc4c_hex",
     "extract_wpint_values",
