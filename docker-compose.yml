@@ -11,13 +11,13 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
       MQTT_BASE_TOPIC: eb7000
-      EB7000_HOST: 192.168.0.9
+      EB7000_HOST: ${EB7000_HOST}
       EB7000_PORT: 502
       POLL_INTERVAL: 30
       MQTT_DISCOVERY_ENABLE: "true"          # or "false" to disable
       MQTT_DISCOVERY_PREFIX: "homeassistant" # change only if you customized HA's prefix
-      MQTT_USERNAME: "orange"
-      MQTT_PASSWORD: "kV32LL3HQ1MN553QJHig"
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
       SENSOR_PREFIX: ""
       EB7000_ENTITY_BASENAME: "O3 EB7000"
       # ENABLED_OBJECTS: "hk1,hk2,fwe,sp"   # optional override — leave unset to auto-detect
