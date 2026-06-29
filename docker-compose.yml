@@ -20,6 +20,7 @@ services:
       MQTT_PASSWORD: "kV32LL3HQ1MN553QJHig"
       SENSOR_PREFIX: ""
       EB7000_ENTITY_BASENAME: "O3 EB7000"
+      # ENABLED_OBJECTS: "hk1,hk2,fwe,sp"   # optional override — leave unset to auto-detect
     networks:
       - mqtt_net
 

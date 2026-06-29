@@ -347,6 +347,113 @@ def extract_wq_values(words: List[int]) -> Dict[str, Any]:
     return r
 
 
+def extract_wpint_values(words: List[int]) -> Dict[str, Any]:
+    if len(words) < 5:
+        return {"error": "insufficient data"}
+    r: Dict[str, Any] = {}
+    for i, key in enumerate(["Vorlauftemperatur", "SoleKalt", "KühlspeicherOben", "KühlspeicherUnten"]):
+        v = get_modbus_dec(words, 1 + i, 1)
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+    return r
+
+
+def extract_wpsiem_values(words: List[int]) -> Dict[str, Any]:
+    if len(words) < 10:
+        return {"error": "insufficient data"}
+    r: Dict[str, Any] = {}
+    for i, key in enumerate(["Vorlauftemperatur", "Rücklauftemperatur", "Quellenaustritt", "Quelleneintritt", "KühlspeicherUnten"]):
+        v = get_modbus_dec(words, 5 + i, 1)
+        r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+    return r
+
+
+def extract_wp4000_values(words: List[int]) -> Dict[str, Any]:
+    r: Dict[str, Any] = {}
+    for i, key in enumerate(["Abtau", "QuellenEIN", "QuellenAUS"]):
+        if len(words) > 12 + i:
+            v = get_modbus_dec(words, 12 + i, 1)
+            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        else:
+            r[key] = None
+    for i, key in enumerate(["WP_Vorlauf", "WP_Rücklauf"]):
+        if len(words) > 21 + i:
+            v = get_modbus_dec(words, 21 + i, 1)
+            r[key] = (v / 10.0) if v is not None and v not in (3150, -3150) else None
+        else:
+            r[key] = None
+    return r
+
+
+def detect_present_objects(host: str = HOST, port: int = PORT) -> set:
+    """
+    Return the set of object keys that are physically present on the EB7000.
+
+    Mirrors the detection logic of the web UI (configuration.js fetchAkObjects):
+    - Reads AK parameter for counts and heat-pump type.
+    - For each of the 8 fixed EB7000 addresses, reads 16 config words via FC03.
+      Word 6 (myStatus) must be non-zero for the object to be considered present.
+    - WPint requires ak.wp_exist==1 and ak.wp_typ==1.
+    - WPsiem requires ak.wp_exist==1 and ak.wp_typ==2.
+    - EB1000 extension modules of type "HK" become hk3, hk4, ...
+    - EB4000 modules become wp4000.
+    """
+    ak = read_ak_parameter(host, port)
+    if "error" in ak:
+        return set()
+
+    wp_exist = ak.get("wp_exist") or 0
+    wp_typ = ak.get("wp_typ") or 0
+    eb1000_count = ak.get("eb1000_count") or 0
+    eb4000_count = ak.get("eb4000_count") or 0
+    ak_words: List[int] = ak.get("raw_words") or []
+
+    # Fixed EB7000 objects in order (index = EB7000AKStep 0-7 in web UI)
+    fixed = [
+        ("hk1",    0x50, 0x2800),
+        ("hk2",    0x50, 0x3000),
+        ("fwe",    0x50, 0x3800),
+        ("sk",     0x50, 0x4000),
+        ("wq",     0x50, 0x4800),
+        ("sp",     0x50, 0x5000),
+        ("wpint",  0x50, 0xB800),
+        ("wpsiem", 0x50, 0xC000),
+    ]
+
+    present: set = set()
+
+    for obj_key, unit, addr in fixed:
+        cfg_words = read_actual_values_fc03(unit, addr, 16, host, port)
+        if not cfg_words or len(cfg_words) < 7:
+            continue
+        status = cfg_words[6]  # myStatus in web UI — non-zero means installed
+        if status == 0:
+            continue
+        if obj_key == "wpint" and (wp_exist != 1 or wp_typ != 1):
+            continue
+        if obj_key == "wpsiem" and (wp_exist != 1 or wp_typ != 2):
+            continue
+        present.add(obj_key)
+
+    # EB1000 extension modules (units 17+i, address 0x2000)
+    hk_ext_count = 0
+    for i in range(eb1000_count):
+        type_idx = get_modbus_dec(ak_words, 9 + i, 1, signed=False) if len(ak_words) > 9 + i else None
+        if type_idx is None:
+            continue
+        type_name = CONST_TYPE50_IDENT[type_idx] if 0 <= type_idx < len(CONST_TYPE50_IDENT) else "None"
+        if type_name == "HK":
+            present.add(f"hk{3 + hk_ext_count}")
+            hk_ext_count += 1
+        # Other EB1000 types (FWE, SK, WQ, WPint, WPsiem) share keys with
+        # their base counterparts and are currently handled by the same extractors.
+
+    # EB4000 heat-pump expansion
+    if eb4000_count > 0:
+        present.add("wp4000")
+
+    return present
+
+
 def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modbus: bool = False) -> Dict[str, Any]:
     ak = read_ak_parameter(host, port)
     result: Dict[str, Any] = {
@@ -372,8 +479,8 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
         ("sk", "50", "4000", extract_sk_values),
         ("wq", "50", "4800", extract_wq_values),
         ("sp", "50", "5000", extract_sp_values),
-        ("wpint", "50", "B800", lambda w: {"raw_words": w} if w else {"error": "empty"}),
-        ("wpsiem", "50", "C000", lambda w: {"raw_words": w} if w else {"error": "empty"}),
+        ("wpint", "50", "B800", extract_wpint_values),
+        ("wpsiem", "50", "C000", extract_wpsiem_values),
     ]
 
     for key, unit, addr, extractor in objects:
@@ -417,11 +524,13 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
 
     eb1000_count = ak.get("eb1000_count", 0) or 0
     ak_words = ak.get("raw_words") if isinstance(ak.get("raw_words"), list) else []
+    hk_ext_count = 0  # counts only HK-type EB1000 modules for consecutive hk3/hk4/... numbering
     for i in range(eb1000_count):
         obj_type_idx = get_modbus_dec(ak_words, 9 + i, 1, signed=False) if len(ak_words) > 9 + i else None
         obj_type = CONST_TYPE50_IDENT[obj_type_idx] if obj_type_idx is not None and 0 <= obj_type_idx < len(CONST_TYPE50_IDENT) else "None"
         if obj_type == "HK":
-            hk_key = f"hk{3 + i}"
+            hk_key = f"hk{3 + hk_ext_count}"
+            hk_ext_count += 1
             result[hk_key] = {}
             unit_eb = 17 + i
             cfg_words_eb = read_actual_values_fc03(unit_eb, 0x2000, 16, host, port)
@@ -458,14 +567,23 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
     ak_cfg = result.get("ak", {})
     if ak_cfg.get("eb4000_count", 0) > 0:
         unit = 33
-        words = read_actual_values_fc03(unit, 0x2000, 16, host, port)
-        result["wp4000"] = {"raw_words": words} if words else {"error": "no response"}
-        if isinstance(result["wp4000"], Dict):
+        words = read_actual_values_fc03(unit, 0x2000, 24, host, port)
+        result["wp4000"] = extract_wp4000_values(words) if words else {"error": "no response"}
+        if isinstance(result["wp4000"], dict):
             result["wp4000"].setdefault("name", OBJECT_FRIENDLY_NAMES.get("wp4000", "Wärmepumpe EB4000"))
 
     return result
 
 
-__all__ = ["read_all_web_ui_values", "set_hk_mode", "set_fwe_mode", "build_hk_urlaub_fc4c_hex"]
+__all__ = [
+    "read_all_web_ui_values",
+    "detect_present_objects",
+    "set_hk_mode",
+    "set_fwe_mode",
+    "build_hk_urlaub_fc4c_hex",
+    "extract_wpint_values",
+    "extract_wpsiem_values",
+    "extract_wp4000_values",
+]
 
 
