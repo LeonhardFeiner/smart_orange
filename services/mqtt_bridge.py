@@ -13,12 +13,13 @@ This file is intended to live in a separate repository together with the
 import json
 import os
 import time
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 import paho.mqtt.client as mqtt
 
 from eb7000.core import (
     read_all_web_ui_values,
+    detect_present_objects,
     set_hk_mode,
     set_fwe_mode,
     set_hk_mode_std,
@@ -54,21 +55,89 @@ if len(SENSOR_PREFIX) > 0 and not SENSOR_PREFIX.endswith(" "):
 
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))
 
+# Comma-separated list of object keys to register in Home Assistant.
+# Leave unset (or empty) to auto-detect from the device on startup.
+# Override example: ENABLED_OBJECTS=hk1,hk2,fwe,sp
+_raw_enabled = os.getenv("ENABLED_OBJECTS", "").strip()
+ENABLED_OBJECTS: set = {item.strip().lower() for item in _raw_enabled.split(",") if item.strip()}
+
+# Sensor metadata helpers
+_wt: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer-water"}
+_ot: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"}
+_fl: Dict[str, Any] = {"unit_of_measurement": "L/min", "state_class": "measurement", "icon": "mdi:water-pump"}
+_pw: Dict[str, Any] = {"unit_of_measurement": "kW", "device_class": "power", "state_class": "measurement", "icon": "mdi:solar-power"}
+
+# Catalog of all known sensors per object type.
+# Keys are the field names as they appear in the JSON state (from extract_* functions).
+SENSOR_CATALOG: Dict[str, List[tuple]] = {
+    "hk": [
+        ("Vorlauftemperatur", _wt),
+        ("Rücklauftemperatur", _wt),
+        ("Vorlaufanforderung", _wt),
+    ],
+    "fwe": [
+        ("Kaltwasser_&_Zirkulation", _wt),
+        ("Warmwasser", _wt),
+        ("Eintritt_Wärmetauscher", _wt),
+        ("Zapfmenge", _fl),
+    ],
+    "sp": [
+        ("FWE_Niveau", _wt),
+        ("HT_Niveau", _wt),
+        ("NT_Niveau", _wt),
+        ("SP_unten", _wt),
+        ("Außentemperatur", _ot),
+    ],
+    "wq": [
+        ("Betriebstemperatur", _ot),
+        ("Rücklauftemperatur", _ot),
+    ],
+    "sk": [
+        ("Kollektortemperatur_F1", _ot),
+        ("Warmtemperatur", _ot),
+        ("Kalttemperatur", _ot),
+        ("Nutztemperatur", _ot),
+        ("Solardurchfluss", _fl),
+        ("Leistung_kW", _pw),
+    ],
+    "wpint": [
+        ("Vorlauftemperatur", _wt),
+        ("SoleKalt", _ot),
+        ("KühlspeicherOben", _ot),
+        ("KühlspeicherUnten", _ot),
+    ],
+    "wpsiem": [
+        ("Vorlauftemperatur", _wt),
+        ("Rücklauftemperatur", _wt),
+        ("Quellenaustritt", _ot),
+        ("Quelleneintritt", _ot),
+        ("KühlspeicherUnten", _ot),
+    ],
+    "wp4000": [
+        ("Abtau", _ot),
+        ("QuellenEIN", _ot),
+        ("QuellenAUS", _ot),
+        ("WP_Vorlauf", _wt),
+        ("WP_Rücklauf", _wt),
+    ],
+}
+
 _discovery_done = False
 # Last requested Urlaub days per HK, used when sending mode=Urlaub.
 _urlaub_days: Dict[int, int] = {}
 
 
 def _make_client() -> mqtt.Client:
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if MQTT_USERNAME and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     return client
 
 
-def _on_connect(client: mqtt.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
+def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_code: Any, properties: Any) -> None:
     base = MQTT_BASE_TOPIC
     client.subscribe(f"{base}/cmd/hk/+/mode")
+    client.subscribe(f"{base}/cmd/hk/+/urlaub_days")
     client.subscribe(f"{base}/cmd/fwe/mode")
 
 
@@ -176,7 +245,7 @@ def publish_state(client: mqtt.Client) -> None:
 
     # Publish discovery once we have a valid example payload
     if MQTT_DISCOVERY_ENABLE and not _discovery_done and isinstance(data, dict):
-        publish_discovery(client, data)
+        publish_discovery(client)
         _discovery_done = True
 
     payload = json.dumps(data)
@@ -185,21 +254,17 @@ def publish_state(client: mqtt.Client) -> None:
     # Also publish individual mode_name topics used by HA selects,
     # so they stay in sync even if the full state lags.
     try:
-        hk1_mode = data.get("hk1", {}).get("mode_name")
-        hk2_mode = data.get("hk2", {}).get("mode_name")
-        hk3_mode = data.get("hk3", {}).get("mode_name")
-        fwe_mode = data.get("fwe", {}).get("mode_name")
-        if hk1_mode is not None:
-            client.publish(f"{base}/hk1/mode_name", hk1_mode, qos=1, retain=True)
-        if hk2_mode is not None:
-            client.publish(f"{base}/hk2/mode_name", hk2_mode, qos=1, retain=True)
-        if hk3_mode is not None:
-            client.publish(f"{base}/hk3/mode_name", hk3_mode, qos=1, retain=True)
-        if fwe_mode is not None:
-            client.publish(f"{base}/fwe/mode_name", fwe_mode, qos=1, retain=True)
-    except Exception:
-        # Never let per-topic publishing break the main state loop.
-        pass
+        for obj_key in ENABLED_OBJECTS:
+            if obj_key.startswith("hk") and obj_key[2:].isdigit():
+                mode = data.get(obj_key, {}).get("mode_name")
+                if mode is not None:
+                    client.publish(f"{base}/{obj_key}/mode_name", mode, qos=1, retain=True)
+        if "fwe" in ENABLED_OBJECTS:
+            fwe_mode = data.get("fwe", {}).get("mode_name")
+            if fwe_mode is not None:
+                client.publish(f"{base}/fwe/mode_name", fwe_mode, qos=1, retain=True)
+    except Exception as exc:
+        print(f"[WARN] mode topic publish failed: {exc}")
 
 
 def _device_info() -> Dict[str, Any]:
@@ -211,214 +276,119 @@ def _device_info() -> Dict[str, Any]:
     }
 
 
-def publish_discovery(client: mqtt.Client, example_state: Dict[str, Any]) -> None:
-    """
-    Publish Home Assistant MQTT discovery configs.
+def _slugify(part: str) -> str:
+    s = part.strip().lower()
+    out_chars: List[str] = []
+    umlaut_map = {
+        "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
+        "Ä": "Ae", "Ö": "Oe", "Ü": "Ue", "&": "_",
+    }
+    for ch in s:
+        mapped = umlaut_map.get(ch, ch)
+        for mch in mapped:
+            out_chars.append(mch if mch.isalnum() else "_")
+    slug = "".join(out_chars).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug or "value"
 
-    This creates entities for (almost) all numeric values
-    in the EB7000 state payload, plus a few convenient mode
-    selects for HK1 and FWE.
-    """
 
+def publish_discovery(client: mqtt.Client) -> None:
+    """
+    Publish Home Assistant MQTT discovery configs for all objects listed in ENABLED_OBJECTS.
+
+    Each object type has a fixed sensor catalog (SENSOR_CATALOG). HK circuits also get
+    a mode select and urlaub-days number entity. FWE gets a mode select.
+
+    Discovery path follows HA convention: {prefix}/{component}/{node_id}/{object_id}/config
+    """
     prefix = MQTT_DISCOVERY_PREFIX
     base = MQTT_BASE_TOPIC
+    node_id = MQTT_BASE_TOPIC  # groups all entities under one device node in the topic hierarchy
     device = _device_info()
 
     def _pub(path: str, payload: Dict[str, Any]) -> None:
-        topic = f"{prefix}/{path}"
-        client.publish(topic, json.dumps(payload), qos=1, retain=True)
+        client.publish(f"{prefix}/{path}", json.dumps(payload), qos=1, retain=True)
 
+    # Determine enabled HK circuit numbers
+    hk_ids = sorted(
+        int(k[2:]) for k in ENABLED_OBJECTS if k.startswith("hk") and k[2:].isdigit()
+    )
 
-    # Combined per-sensor metadata:
-    # - "unit": unit_of_measurement
-    # - "icon": Home Assistant icon
-    watertemp: Dict[str, Any] = {"unit_of_measurement": "°C", "icon": "mdi:thermometer-water"}
-    waterflow: Dict[str, Any] = {"unit_of_measurement": "l/min", "icon": "mdi:water-pump"}
-    othertemp: Dict[str, Any] = {"unit_of_measurement": "°C", "icon": "mdi:thermometer"}
-    skip: Dict[str, Any] = None
-
-    sensor_overrides: Dict[str, Dict[str, Any]] = {
-        # Vorlauf / Rücklauf / Vorlaufanforderung / Speicher / Warmwasser / Kaltwasser
-        ("hk1", "vorlauftemperatur"): (watertemp, None),
-        ("hk1", "ruecklauftemperatur"): (watertemp, None),
-        ("hk1", "vorlaufanforderung"): (watertemp, None),
-        ("hk2", "vorlauftemperatur"): (watertemp, None),
-        ("hk2", "ruecklauftemperatur"): (watertemp, None),
-        ("hk2", "vorlaufanforderung"): (watertemp, None),
-        ("hk3", "vorlauftemperatur"): (watertemp, None),
-        ("hk3", "ruecklauftemperatur"): (watertemp, None),
-        ("hk3", "vorlaufanforderung"): (watertemp, None),
-        ("fwe", "kaltwasser_zirkulation"): (watertemp, None),
-        ("fwe", "warmwasser"): (watertemp, None),
-        ("fwe", "eintritt_waermetauscher"): (watertemp, None),
-        ("sp", "fwe_niveau"): (watertemp, None),
-        ("sp", "ht_niveau"): (watertemp, None),
-        ("sp", "nt_niveau"): (watertemp, None),
-        ("sp", "sp_unten"): (watertemp, None),
-        # Zapfmenge (flow)
-        ("fwe", "zapfmenge"): (waterflow, None),
-        # Betriebstemperatur + Außentemperatur
-        ("wq", "betriebstemperatur"): (othertemp, None),
-        ("sp", "aussentemperatur"): (othertemp, None),
-        # Sensors we want to skip entirely from auto-generation
-        ("hk3", "pause"): skip,
-        ("hk2", "pause"): skip,
-        ("hk1", "pause"): skip,
-        ("ak", "eb1000_count"): skip,
-        ("ak", "eb4000_count"): skip,
-        ("ak", "rbm8_count"): skip,
-        ("ak", "wp_exist"): skip,
-        ("ak", "wp_typ"): skip,
-        ("hk2", "mode"): skip,
-        ("hk1", "mode"): skip,
-        ("hk1", "name_control_hi"): skip,
-        ("hk1", "name_control_lo"): skip,
-        ("hk1", "status_bits_word0"): skip,
-        ("hk1", "status_bits_word8"): skip,
-        ("hk2", "name_control_hi"): skip,
-        ("hk2", "name_control_lo"): skip,
-        ("hk3", "mode"): skip,
-        ("hk3", "status_bits_word0"): skip,
-        ("hk3", "status_bits_word8"): skip,
-        ("hk2", "status_bits_word0"): skip,
-        ("hk2", "status_bits_word8"): skip,
-        ("sk", "kalttemperatur"): skip,
-        ("sk", "kollektortemperatur_f1"): skip,
-        ("sk", "leistung_kw"): skip,
-        ("sk", "name_control_hi"): skip,
-        ("sk", "name_control_lo"): skip,
-        ("sk", "nutztemperatur"): skip,
-        ("sk", "solardurchfluss"): skip,
-        ("sk", "warmtemperatur"): skip,
-        ("sp", "name_control_hi"): skip,
-        ("sp", "name_control_lo"): skip,
-        ("wpint", "name_control_hi"): skip,
-        ("wpint", "name_control_lo"): skip,
-        ("wq", "name_control_hi"): skip,
-        ("wq", "name_control_lo"): skip,
-        ("fwe", "mode"): skip,
-        ("fwe", "name_control_hi"): skip,
-        ("fwe", "name_control_lo"): skip,
-    }
-
-    def _slugify(part: str) -> str:
-        s = part.strip().lower()
-        out_chars: List[str] = []
-        umlaut_map = {
-            "ä": "ae",
-            "ö": "oe",
-            "ü": "ue",
-            "ß": "ss",
-            "Ä": "Ae",
-            "Ö": "Oe",
-            "Ü": "Ue",
-            "&": "_",
-        }
-        for ch in s:
-            mapped = umlaut_map.get(ch, ch)
-            for mch in mapped:
-                if mch.isalnum():
-                    out_chars.append(mch)
-                else:
-                    out_chars.append("_")
-        slug = "".join(out_chars).strip("_")
-        while "__" in slug:
-            slug = slug.replace("__", "_")
-        return slug or "value"
-
-    def _iter_numeric_paths(prefix: List[str], value: Any) -> Iterable[List[str]]:
-        if isinstance(value, dict):
-            for k, v in value.items():
-                new_prefix = prefix + [str(k)]
-                yield from _iter_numeric_paths(new_prefix, v)
-        elif isinstance(value, (int, float, bool)):
-            yield prefix
-
-    # Auto-generate sensors for all numeric / boolean leaves
-    if isinstance(example_state, dict):
-        for path in _iter_numeric_paths([], example_state):
-            if not path:
-                continue
-            # Build unique_id and look up per-sensor metadata
-            slug_parts = tuple(_slugify(p) for p in path)
-            meta_new_name = sensor_overrides.get(slug_parts, None)
-            if meta_new_name is None:
-                continue
-            meta, new_name = meta_new_name
-
-            unique_id = ID_PREFIX + "_".join(slug_parts)
-
-            first_part, *other_parts = path
-            if new_name is not None:
-                other_parts = [new_name]
-
-            secondary_name = " ".join(p.replace("_", " ").title() for p in other_parts)
-            name = SENSOR_PREFIX + first_part.upper() + " " + secondary_name
-
-            # Build Jinja2 value_template using dict-style access to be robust to umlauts
-            path_expr = "".join(f'["{p}"]' for p in path)
-            value_template = f"{{{{ value_json{path_expr} }}}}"
-
-            payload = {
+    # Sensors: one entity per catalog entry per enabled object
+    for obj_key in sorted(ENABLED_OBJECTS):
+        obj_type = "hk" if (obj_key.startswith("hk") and obj_key[2:].isdigit()) else obj_key
+        for field_name, meta in SENSOR_CATALOG.get(obj_type, []):
+            field_slug = _slugify(field_name)
+            unique_id = f"{ID_PREFIX}{obj_key}_{field_slug}"
+            field_display = field_name.replace("_", " ")
+            name = f"{SENSOR_PREFIX}{obj_key.upper()} {field_display}"
+            value_template = f'{{{{ value_json["{obj_key}"]["{field_name}"] }}}}'
+            _pub(f"sensor/{node_id}/{obj_key}_{field_slug}/config", {
                 "name": name,
                 "state_topic": f"{base}/state",
                 "value_template": value_template,
                 "unique_id": unique_id,
                 "device": device,
                 **meta,
-            }
+            })
 
-            _pub(f"sensor/{unique_id}/config", payload)
+    # Mode selects and urlaub-days numbers for enabled HK circuits
+    for hk_id in hk_ids:
+        hk_key = f"hk{hk_id}"
+        select_id = f"{ID_PREFIX}{hk_key}_mode"
+        _pub(f"select/{node_id}/{hk_key}_mode/config", {
+            "name": f"{SENSOR_PREFIX}HK{hk_id} Modus",
+            "state_topic": f"{base}/{hk_key}/mode_name",
+            "command_topic": f"{base}/cmd/hk/{hk_id}/mode",
+            "value_template": "{{ value }}",
+            "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
+            "unique_id": select_id,
+            "device": device,
+        })
+        number_id = f"{ID_PREFIX}{hk_key}_urlaub_days"
+        _pub(f"number/{node_id}/{hk_key}_urlaub_days/config", {
+            "name": f"{SENSOR_PREFIX}HK{hk_id} Urlaubstage",
+            "state_topic": f"{base}/{hk_key}/urlaub_days",
+            "command_topic": f"{base}/cmd/hk/{hk_id}/urlaub_days",
+            "min": 1, "max": 365, "step": 1, "mode": "box",
+            "unit_of_measurement": "d",
+            "unique_id": number_id,
+            "device": device,
+        })
 
-
-    # Mode selects for HK1–HK3 and FWE
-    selects: Dict[str, Dict[str, Any]] = {
-        f"select/{ID_PREFIX}fwe_mode/config": {
+    # FWE mode select
+    if "fwe" in ENABLED_OBJECTS:
+        select_id = f"{ID_PREFIX}fwe_mode"
+        _pub(f"select/{node_id}/fwe_mode/config", {
             "name": f"{SENSOR_PREFIX}FWE Modus",
             "state_topic": f"{base}/fwe/mode_name",
             "command_topic": f"{base}/cmd/fwe/mode",
             "value_template": "{{ value }}",
             "options": ["Automatik", "Spar"],
-            "unique_id": f"{ID_PREFIX}fwe_mode",
+            "unique_id": select_id,
             "device": device,
-        },
-        **{
-            f"select/{ID_PREFIX}hk{hk_id}_mode/config": {
-                "name": f"{SENSOR_PREFIX}HK{hk_id} Modus",
-                "state_topic": f"{base}/hk{hk_id}/mode_name",
-                "command_topic": f"{base}/cmd/hk/{hk_id}/mode",
-                "value_template": "{{ value }}",
-                "options": ["Automatik", "Party", "Frostschutz", "Urlaub", "Anheben"],
-                "unique_id": f"{ID_PREFIX}hk{hk_id}_mode",
-                "device": device,
-            } for hk_id in range(1, 4)
-        }
-    }
-
-    for path, payload in selects.items():
-        _pub(path, payload)
-
-    # Urlaub days numbers for HK1–HK3
-    numbers: Dict[str, Dict[str, Any]] = {
-        f"number/{ID_PREFIX}_hk{hk_id}_urlaub_days/config": {
-            "name": f"{SENSOR_PREFIX}HK{hk_id} Urlaubstage",
-            "state_topic": f"{base}/hk{hk_id}/urlaub_days",
-            "command_topic": f"{base}/cmd/hk/{hk_id}/urlaub_days",
-            "min": 1,
-            "max": 365,
-            "step": 1,
-            "mode": "box",
-            "unit_of_measurement": "d",
-            "unique_id": f"{ID_PREFIX}_hk{hk_id}_urlaub_days",
-            "device": device,
-        } for hk_id in range(1, 4)
-    }
-
-    for path, payload in numbers.items():
-        _pub(path, payload)
+        })
 
 
 def main() -> None:
+    global ENABLED_OBJECTS
+
+    if not ENABLED_OBJECTS:
+        print("ENABLED_OBJECTS not set — auto-detecting present objects...")
+        for attempt in range(1, 4):
+            detected = detect_present_objects(EB7000_HOST, EB7000_PORT)
+            if detected:
+                ENABLED_OBJECTS = detected
+                print(f"Detected: {sorted(ENABLED_OBJECTS)}")
+                break
+            print(f"Detection attempt {attempt}/3 failed, retrying in 10 s...")
+            time.sleep(10)
+        else:
+            print("Auto-detection failed — check EB7000 connection. No HA entities will be created.")
+    else:
+        print(f"Using configured objects: {sorted(ENABLED_OBJECTS)}")
+
     client = _make_client()
     client.on_connect = _on_connect
     client.on_message = _on_message
@@ -430,8 +400,8 @@ def main() -> None:
         while True:
             try:
                 publish_state(client)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[ERROR] publish_state failed: {exc}")
             time.sleep(POLL_INTERVAL)
     finally:
         client.loop_stop()
