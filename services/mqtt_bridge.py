@@ -141,10 +141,14 @@ def _make_client() -> mqtt.Client:
 
 def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_code: Any, properties: Any) -> None:
     base = MQTT_BASE_TOPIC
-    client.subscribe(f"{base}/cmd/hk/+/mode")
-    client.subscribe(f"{base}/cmd/hk/+/urlaub_days")
-    client.subscribe(f"{base}/cmd/fwe/mode")
+    client.subscribe(f"{base}/cmd/hk/+/mode", qos=1)
+    client.subscribe(f"{base}/cmd/hk/+/urlaub_days", qos=1)
+    client.subscribe(f"{base}/cmd/fwe/mode", qos=1)
     client.publish(AVAILABILITY_TOPIC, PAYLOAD_AVAILABLE, qos=1, retain=True)
+
+
+def _on_disconnect(client: mqtt.Client, userdata: Any, disconnect_flags: Any, reason_code: Any, properties: Any = None) -> None:
+    print(f"[WARN] MQTT disconnected: {reason_code}")
 
 
 def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -403,6 +407,7 @@ def main() -> None:
 
     client = _make_client()
     client.on_connect = _on_connect
+    client.on_disconnect = _on_disconnect
     client.on_message = _on_message
 
     client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
@@ -414,7 +419,9 @@ def main() -> None:
                 publish_state(client)
             except Exception as exc:
                 print(f"[ERROR] publish_state failed: {exc}")
-            time.sleep(POLL_INTERVAL)
+            now = time.time()
+            next_target = (now // POLL_INTERVAL + 1) * POLL_INTERVAL
+            time.sleep(next_target - now)
     finally:
         # A clean disconnect() below suppresses the broker-side LWT, so publish
         # the "lost" availability ourselves for graceful shutdowns. Ungraceful

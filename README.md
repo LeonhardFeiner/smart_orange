@@ -63,6 +63,18 @@ All configuration is done via environment variables. Copy `.env.example` to `.en
 | `{base}/cmd/hk/{N}/urlaub_days` | subscribed | Set vacation days for heating circuit N |
 | `{base}/cmd/fwe/mode` | subscribed | Set fresh water mode |
 
+### Removing stale entities
+
+Discovery configs are retained forever once published, so an object that stops being auto-detected (or gets dropped from `ENABLED_OBJECTS`) between restarts leaves a ghost entity in HA. Clear it manually:
+
+```sh
+# List currently retained discovery topics
+mosquitto_sub -h <broker> -u <user> -P <pass> -t 'homeassistant/+/eb7000/#' --retained-only -v -W 2
+
+# Retract one (empty retained payload removes the entity from HA)
+mosquitto_pub -h <broker> -u <user> -P <pass> -t 'homeassistant/sensor/eb7000/<old_object_id>/config' -n -r
+```
+
 ### Operating Modes
 
 **Heating circuits:** `Automatik`, `Party`, `Frostschutz`, `Urlaub`, `Anheben`
