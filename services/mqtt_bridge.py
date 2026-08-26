@@ -132,7 +132,7 @@ _urlaub_days: Dict[int, int] = {}
 
 
 def _make_client() -> mqtt.Client:
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="eb7000-mqtt-bridge")
     if MQTT_USERNAME and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.will_set(AVAILABILITY_TOPIC, PAYLOAD_NOT_AVAILABLE, qos=1, retain=True)
