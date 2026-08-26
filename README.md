@@ -58,6 +58,7 @@ All configuration is done via environment variables. Copy `.env.example` to `.en
 | `{base}/state` | published | Full JSON snapshot of all sensor values |
 | `{base}/{component}/mode` | published | Current mode name |
 | `{base}/{component}/urlaub_days` | published | Vacation days remaining |
+| `{base}/status` | published | Retained availability (`ready` / `lost`) — LWT on ungraceful disconnect, explicit on graceful shutdown |
 | `{base}/cmd/hk/{N}/mode` | subscribed | Set heating circuit N mode |
 | `{base}/cmd/hk/{N}/urlaub_days` | subscribed | Set vacation days for heating circuit N |
 | `{base}/cmd/fwe/mode` | subscribed | Set fresh water mode |

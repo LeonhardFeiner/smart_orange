@@ -38,6 +38,10 @@ MQTT_BASE_TOPIC = os.getenv("MQTT_BASE_TOPIC", "eb7000").rstrip("/")
 MQTT_DISCOVERY_PREFIX = os.getenv("MQTT_DISCOVERY_PREFIX", "homeassistant").rstrip("/")
 MQTT_DISCOVERY_ENABLE = os.getenv("MQTT_DISCOVERY_ENABLE", "true").lower() in ("1", "true", "yes", "on")
 
+AVAILABILITY_TOPIC = f"{MQTT_BASE_TOPIC}/status"
+PAYLOAD_AVAILABLE = "ready"
+PAYLOAD_NOT_AVAILABLE = "lost"
+
 EB7000_HOST = os.getenv("EB7000_HOST", "192.168.0.9")
 EB7000_PORT = int(os.getenv("EB7000_PORT", "502"))
 
@@ -131,6 +135,7 @@ def _make_client() -> mqtt.Client:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     if MQTT_USERNAME and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    client.will_set(AVAILABILITY_TOPIC, PAYLOAD_NOT_AVAILABLE, qos=1, retain=True)
     return client
 
 
@@ -139,6 +144,7 @@ def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_c
     client.subscribe(f"{base}/cmd/hk/+/mode")
     client.subscribe(f"{base}/cmd/hk/+/urlaub_days")
     client.subscribe(f"{base}/cmd/fwe/mode")
+    client.publish(AVAILABILITY_TOPIC, PAYLOAD_AVAILABLE, qos=1, retain=True)
 
 
 def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -308,6 +314,12 @@ def publish_discovery(client: mqtt.Client) -> None:
     device = _device_info()
 
     def _pub(path: str, payload: Dict[str, Any]) -> None:
+        payload = {
+            **payload,
+            "availability_topic": AVAILABILITY_TOPIC,
+            "payload_available": PAYLOAD_AVAILABLE,
+            "payload_not_available": PAYLOAD_NOT_AVAILABLE,
+        }
         client.publish(f"{prefix}/{path}", json.dumps(payload), qos=1, retain=True)
 
     # Determine enabled HK circuit numbers
@@ -404,6 +416,15 @@ def main() -> None:
                 print(f"[ERROR] publish_state failed: {exc}")
             time.sleep(POLL_INTERVAL)
     finally:
+        # A clean disconnect() below suppresses the broker-side LWT, so publish
+        # the "lost" availability ourselves for graceful shutdowns. Ungraceful
+        # deaths still fall back to the LWT set in _make_client().
+        try:
+            client.publish(
+                AVAILABILITY_TOPIC, PAYLOAD_NOT_AVAILABLE, qos=1, retain=True
+            ).wait_for_publish(timeout=2)
+        except Exception:
+            pass
         client.loop_stop()
         client.disconnect()
 
