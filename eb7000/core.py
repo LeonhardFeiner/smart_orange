@@ -246,7 +246,7 @@ def extract_sp_values(words: List[int]) -> Dict[str, Any]:
         v = get_modbus_dec(words, 2 + i, 1)
         r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     out = get_modbus_dec(words, 10, 1)
-    r["Außentemperatur"] = (out / 10.0) if out is not None and out != -3150 else None
+    r["Außentemperatur"] = (out / 10.0) if out is not None and out not in (3150, -3150, 31500, -31500) else None
     return r
 
 
