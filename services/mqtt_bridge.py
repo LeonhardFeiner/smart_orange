@@ -70,6 +70,10 @@ _wt: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperatur
 _ot: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperature", "state_class": "measurement", "icon": "mdi:thermometer"}
 _fl: Dict[str, Any] = {"unit_of_measurement": "L/min", "state_class": "measurement", "icon": "mdi:water-pump"}
 _pw: Dict[str, Any] = {"unit_of_measurement": "kW", "device_class": "power", "state_class": "measurement", "icon": "mdi:solar-power"}
+# Installer-level settings (read-only here) rather than live sensor readings —
+# see extract_hk_settings()/extract_fwe_settings() in eb7000/core.py.
+_ts: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperature", "icon": "mdi:tune-variant"}
+_mn: Dict[str, Any] = {"unit_of_measurement": "min", "icon": "mdi:timer-outline"}
 
 # Catalog of all known sensors per object type.
 # Keys are the field names as they appear in the JSON state (from extract_* functions).
@@ -78,12 +82,20 @@ SENSOR_CATALOG: Dict[str, List[tuple]] = {
         ("Vorlauftemperatur", _wt),
         ("Rücklauftemperatur", _wt),
         ("Vorlaufanforderung", _wt),
+        ("Parallelverschiebung", _ts),
+        ("Absenkung", _ts),
+        ("Schnellaufheizung", _ts),
+        ("AusAussentemperatur", _ts),
     ],
     "fwe": [
         ("Kaltwasser_&_Zirkulation", _wt),
         ("Warmwasser", _wt),
         ("Eintritt_Wärmetauscher", _wt),
         ("Zapfmenge", _fl),
+        ("WWNormalSollTemperatur", _ts),
+        ("WWSparSollTemperatur", _ts),
+        ("ZirkulationPausenzeit", _mn),
+        ("ZirkulationMaxLaufzeit", _mn),
     ],
     "sp": [
         ("FWE_Niveau", _wt),

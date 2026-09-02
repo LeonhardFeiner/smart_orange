@@ -337,6 +337,47 @@ def extract_sk_values(words: List[int]) -> Dict[str, Any]:
     return r
 
 
+def extract_hk_settings(words: List[int]) -> Dict[str, Any]:
+    """
+    Installer-level HK settings not read by the original web UI (which only
+    ever fetched the first 16 words of this block). Offsets confirmed
+    2026-09-02 by cross-referencing a raw Modbus dump against photos of the
+    EB7000's physical control panel (FB/Heizkoerper/Fancoil circuits).
+    """
+    if len(words) < 60:
+        return {}
+    r: Dict[str, Any] = {}
+    v = get_modbus_dec(words, 15, 1)
+    r["Parallelverschiebung"] = (v / 10.0) if v is not None else None
+    v = get_modbus_dec(words, 20, 1)
+    r["Absenkung"] = (v / 10.0) if v is not None else None
+    v = get_modbus_dec(words, 21, 1)
+    r["Schnellaufheizung"] = (v / 10.0) if v is not None else None
+    v = get_modbus_dec(words, 59, 1)
+    r["AusAussentemperatur"] = (v / 10.0) if v is not None else None
+    return r
+
+
+def extract_fwe_settings(words: List[int]) -> Dict[str, Any]:
+    """
+    Installer-level FWE (Warmwasser) settings, same provenance as
+    extract_hk_settings(). Offsets confirmed against WW-Daten and
+    Zirkulation panel screens.
+    """
+    if len(words) < 53:
+        return {}
+    r: Dict[str, Any] = {}
+    v = get_modbus_dec(words, 9, 1)
+    r["WWNormalSollTemperatur"] = (v / 10.0) if v is not None else None
+    v = get_modbus_dec(words, 10, 1)
+    r["WWSparSollTemperatur"] = (v / 10.0) if v is not None else None
+    v = get_modbus_dec(words, 51, 1, signed=False)
+    r["ZirkulationPausenzeit"] = v
+    v = get_modbus_dec(words, 52, 1)
+    r["ZirkulationMaxLaufzeit"] = (v / 10.0) if v is not None else None
+    return r
+
+
 def extract_wq_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 3:
         return {"error": "insufficient data"}
@@ -508,7 +549,12 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
 
         if isinstance(result.get(key), dict):
             base_name = OBJECT_FRIENDLY_NAMES.get(key, key)
-            cfg_words = read_actual_values_fc03(unit_int, start, 16, host, port)
+            # hk1/hk2/fwe blocks are confirmed readable up to 64 words (see
+            # extract_hk_settings/extract_fwe_settings); other object types
+            # keep the original 16-word read since their extents beyond that
+            # aren't mapped to named settings yet.
+            cfg_count = 64 if key in ("hk1", "hk2", "fwe") else 16
+            cfg_words = read_actual_values_fc03(unit_int, start, cfg_count, host, port)
             obj_name = get_modbus_string(cfg_words, 0, 5) if cfg_words else ""
             if cfg_words:
                 w0 = cfg_words[0] & 0xFFFF
@@ -521,6 +567,10 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
                 result[key]["name"] = f"{base_name} - {obj_name}"
             else:
                 result[key].setdefault("name", base_name)
+            if key in ("hk1", "hk2") and cfg_words:
+                result[key].update(extract_hk_settings(cfg_words))
+            elif key == "fwe" and cfg_words:
+                result[key].update(extract_fwe_settings(cfg_words))
 
     eb1000_count = ak.get("eb1000_count", 0) or 0
     ak_words = ak.get("raw_words") if isinstance(ak.get("raw_words"), list) else []
@@ -533,7 +583,7 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
             hk_ext_count += 1
             result[hk_key] = {}
             unit_eb = 17 + i
-            cfg_words_eb = read_actual_values_fc03(unit_eb, 0x2000, 16, host, port)
+            cfg_words_eb = read_actual_values_fc03(unit_eb, 0x2000, 64, host, port)
             hk_device_name = get_modbus_string(cfg_words_eb, 0, 5) if cfg_words_eb else ""
             if use_standard_modbus:
                 words = read_actual_values_fc04(unit_eb, 0x2000, 16, host, port)
@@ -563,6 +613,8 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
                         result[hk_key].setdefault("name", base_name)
                 except ValueError:
                     result[hk_key].setdefault("name", hk_key)
+                if cfg_words_eb:
+                    result[hk_key].update(extract_hk_settings(cfg_words_eb))
 
     ak_cfg = result.get("ak", {})
     if ak_cfg.get("eb4000_count", 0) > 0:
@@ -585,6 +637,8 @@ __all__ = [
     "extract_wpint_values",
     "extract_wpsiem_values",
     "extract_wp4000_values",
+    "extract_hk_settings",
+    "extract_fwe_settings",
 ]
 
 
