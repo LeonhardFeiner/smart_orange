@@ -41,19 +41,6 @@ def _build_modbus_fc4a(unit: int, start_addr: int) -> bytes:
     return struct.pack(">HHH", tid, pid, length) + pdu
 
 
-def _build_modbus_fc06(unit: int, reg_addr: int, value: int) -> bytes:
-    tid, pid = 1, 0
-    pdu = bytes([unit, 0x06]) + struct.pack(">HH", reg_addr, value & 0xFFFF)
-    return struct.pack(">HHH", tid, pid, len(pdu)) + pdu
-
-
-def _build_modbus_fc16(unit: int, start_addr: int, values: List[int]) -> bytes:
-    tid, pid = 1, 0
-    data = b"".join(struct.pack(">H", v & 0xFFFF) for v in values)
-    pdu = bytes([unit, 0x10]) + struct.pack(">HHB", start_addr, len(values), len(data)) + data
-    return struct.pack(">HHH", tid, pid, len(pdu)) + pdu
-
-
 def _send_modbus(cmd: bytes, host: str = HOST, port: int = PORT, timeout: float = 2.0) -> Optional[bytes]:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -200,27 +187,6 @@ def set_hk_mode(hk: int, mode: int, urlaub_days: Optional[int] = None, host: str
     cmd = _build_modbus_fc4c_hk(unit, start, mode, urlaub_days)
     resp = _send_modbus(cmd, host, port)
     return resp is not None and len(resp) >= 8 and resp[7] == 0x4C
-
-
-def set_fwe_mode_std(mode: int, host: str = HOST, port: int = PORT) -> bool:
-    cmd = _build_modbus_fc06(80, 0x3801, mode)
-    resp = _send_modbus(cmd, host, port)
-    return resp is not None and len(resp) >= 8 and resp[7] == 0x06
-
-
-def set_hk_mode_std(hk: int, mode: int, urlaub_days: Optional[int] = None, host: str = HOST, port: int = PORT) -> bool:
-    addrs = [(80, 0x2800), (80, 0x3000), (17, 0x2000)]
-    if hk < 1 or hk > len(addrs):
-        return False
-    unit, start = addrs[hk - 1]
-    if mode == 3 and urlaub_days is not None:
-        cmd = _build_modbus_fc16(unit, start + 1, [3, urlaub_days])
-        resp = _send_modbus(cmd, host, port)
-        return resp is not None and len(resp) >= 8 and resp[7] == 0x10
-    else:
-        cmd = _build_modbus_fc06(unit, start + 1, mode)
-        resp = _send_modbus(cmd, host, port)
-        return resp is not None and len(resp) >= 8 and resp[7] == 0x06
 
 
 def build_hk_urlaub_fc4c_hex(hk: int, urlaub_days: int) -> Optional[str]:
@@ -631,7 +597,6 @@ __all__ = [
     "read_all_web_ui_values",
     "detect_present_objects",
     "set_hk_mode",
-    "set_hk_mode_std",
     "set_fwe_mode",
     "build_hk_urlaub_fc4c_hex",
     "extract_wpint_values",

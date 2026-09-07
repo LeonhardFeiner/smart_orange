@@ -22,7 +22,6 @@ from eb7000.core import (
     detect_present_objects,
     set_hk_mode,
     set_fwe_mode,
-    set_hk_mode_std,
     HK_MODE_NAMES,
     FWE_MODE_NAMES,
     build_hk_urlaub_fc4c_hex,
@@ -209,9 +208,6 @@ def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> No
                 client.publish(f"{base}/debug/last_hk{hk_num}_urlaub_fc4c_hex", hex_cmd, qos=1, retain=True)
 
         ok = set_hk_mode(hk_num, mode, urlaub_days=urlaub_days, host=EB7000_HOST, port=EB7000_PORT)
-        # Fallback: some firmwares accept the standard Modbus write for Urlaub.
-        if not ok and mode == 3 and urlaub_days is not None:
-            ok = set_hk_mode_std(hk_num, mode, urlaub_days=urlaub_days, host=EB7000_HOST, port=EB7000_PORT)
         if ok:
             # Update HK mode_name topic directly so the select reflects
             # the new value without forcing a full state read.
