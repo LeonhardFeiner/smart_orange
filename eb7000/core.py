@@ -55,7 +55,7 @@ def _send_modbus(cmd: bytes, host: str = HOST, port: int = PORT, timeout: float 
 
 
 def _parse_fc03_response(resp: bytes) -> Optional[List[int]]:
-    if len(resp) < 10 or resp[7] != 0x03:
+    if not resp or len(resp) < 10 or resp[7] != 0x03:
         return None
     byte_count = resp[8]
     data = resp[9 : 9 + byte_count]
@@ -67,7 +67,7 @@ def _parse_fc03_response(resp: bytes) -> Optional[List[int]]:
 
 
 def _parse_fc04_response(resp: bytes) -> Optional[List[int]]:
-    if len(resp) < 10 or resp[7] != 0x04:
+    if not resp or len(resp) < 10 or resp[7] != 0x04:
         return None
     byte_count = resp[8]
     data = resp[9 : 9 + byte_count]
@@ -78,8 +78,8 @@ def _parse_fc04_response(resp: bytes) -> Optional[List[int]]:
     return vals
 
 
-def _response_to_words(resp: bytes) -> Optional[List[int]]:
-    if len(resp) < 9:
+def _response_to_words(resp: Optional[bytes]) -> Optional[List[int]]:
+    if not resp or len(resp) < 9:
         return None
     fc = resp[7]
     if fc == 0x03:
