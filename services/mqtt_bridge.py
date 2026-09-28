@@ -155,6 +155,10 @@ def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_c
     client.subscribe(f"{base}/cmd/hk/+/mode", qos=1)
     client.subscribe(f"{base}/cmd/hk/+/urlaub_days", qos=1)
     client.subscribe(f"{base}/cmd/fwe/mode", qos=1)
+    if MQTT_DISCOVERY_ENABLE:
+        client.subscribe(f"{MQTT_DISCOVERY_PREFIX}/status", qos=1)
+        if ENABLED_OBJECTS:
+            publish_discovery(client)
     client.publish(AVAILABILITY_TOPIC, PAYLOAD_AVAILABLE, qos=1, retain=True)
 
 
@@ -166,6 +170,13 @@ def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> No
     topic = msg.topic
     payload = msg.payload.decode(errors="ignore").strip()
     base = MQTT_BASE_TOPIC
+
+    # Re-publish discovery when Home Assistant announces it is online
+    if topic == f"{MQTT_DISCOVERY_PREFIX}/status" and payload.lower() == "online":
+        if MQTT_DISCOVERY_ENABLE and ENABLED_OBJECTS:
+            print("[INFO] Home Assistant online message received; re-publishing discovery...")
+            publish_discovery(client)
+        return
 
     # Handle Urlaub days commands first: eb7000/cmd/hk/<n>/urlaub_days
     if topic.startswith(f"{base}/cmd/hk/") and topic.endswith("/urlaub_days"):
