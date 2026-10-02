@@ -324,6 +324,22 @@ def extract_hk_settings(words: List[int]) -> Dict[str, Any]:
     return r
 
 
+# Last good installer settings per object key. The 64-word config block read
+# (extract_hk_settings) intermittently fails (~9 % of polls on hk3, an EB1000
+# extension module); without this the keys vanish from the state JSON and every
+# Home Assistant sensor templated on them logs a "no attribute" warning and
+# flickers to unknown. Keep serving the last good values instead.
+_LAST_HK_SETTINGS: Dict[str, Dict[str, Any]] = {}
+
+
+def apply_hk_settings(result_obj: Dict[str, Any], key: str, cfg_words: Optional[List[int]]) -> None:
+    """Merge installer settings into ``result_obj``, falling back to the last good read."""
+    fresh = extract_hk_settings(cfg_words) if cfg_words else {}
+    if fresh:
+        _LAST_HK_SETTINGS[key] = fresh
+    result_obj.update(fresh or _LAST_HK_SETTINGS.get(key, {}))
+
+
 def extract_fwe_settings(words: List[int]) -> Dict[str, Any]:
     """
     Installer-level FWE (Warmwasser) settings, same provenance as
@@ -533,8 +549,8 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
                 result[key]["name"] = f"{base_name} - {obj_name}"
             else:
                 result[key].setdefault("name", base_name)
-            if key in ("hk1", "hk2") and cfg_words:
-                result[key].update(extract_hk_settings(cfg_words))
+            if key in ("hk1", "hk2"):
+                apply_hk_settings(result[key], key, cfg_words)
             elif key == "fwe" and cfg_words:
                 result[key].update(extract_fwe_settings(cfg_words))
 
@@ -579,8 +595,7 @@ def read_all_web_ui_values(host: str = HOST, port: int = PORT, use_standard_modb
                         result[hk_key].setdefault("name", base_name)
                 except ValueError:
                     result[hk_key].setdefault("name", hk_key)
-                if cfg_words_eb:
-                    result[hk_key].update(extract_hk_settings(cfg_words_eb))
+                apply_hk_settings(result[hk_key], hk_key, cfg_words_eb)
 
     ak_cfg = result.get("ak", {})
     if ak_cfg.get("eb4000_count", 0) > 0:
