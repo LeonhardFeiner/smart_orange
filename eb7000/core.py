@@ -204,6 +204,32 @@ def build_hk_urlaub_fc4c_hex(hk: int, urlaub_days: int) -> Optional[str]:
     return f"00010000000b{unit_hex}4c{addr_hex}0002040003{days_hex}"
 
 
+def extract_sp_status_meldung(w0: int, w1: int) -> str:
+    """Exact reproduction of EB7000 firmware refreshSPMessages (gui_sp.js)."""
+    if w0 & 0x0001:
+        return "Fehler: EEPROM"
+    if w0 & 0x0002:
+        return "Fehler: Parameter"
+    if w0 & 0x0008:
+        return "Fehler: Sensoren überprüfen"
+
+    if w0 & 0x1000:
+        return "WW Vorrang"
+    if w1 & 0x0001:
+        return "Wärmeanforderung FWE"
+    if w1 & 0x0002:
+        return "Wärmeanforderung FWE erweitert"
+    if w1 & 0x0004:
+        return "Wärmeanforderung HT-HK"
+    if w1 & 0x0008:
+        return "Wärmeanforderung HT-HK erweitert"
+    if w1 & 0x0010:
+        return "Wärmeanforderung NT-HK"
+    if w0 & 0x8000:
+        return "Maximale Speicher Temperatur (S10) erreicht"
+    return "Bereit"
+
+
 def extract_sp_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 11:
         return {"error": "insufficient data"}
@@ -213,6 +239,23 @@ def extract_sp_values(words: List[int]) -> Dict[str, Any]:
         r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     out = get_modbus_dec(words, 10, 1)
     r["Außentemperatur"] = (out / 10.0) if out is not None and out not in (3150, -3150, 31500, -31500) else None
+
+    w0 = get_modbus_dec(words, 0, 1, signed=False) or 0
+    w1 = get_modbus_dec(words, 1, 1, signed=False) or 0
+    r["status_bits_word0"] = w0
+    r["status_bits_word1"] = w1
+    r["Statusmeldung"] = extract_sp_status_meldung(w0, w1)
+    r["WW_Vorrang"] = bool(w0 & 0x1000)
+    r["Waermeanforderung_FWE"] = bool(w1 & 0x0001)
+    r["Waermeanforderung_FWE_Erweitert"] = bool(w1 & 0x0002)
+    r["Waermeanforderung_HT_HK"] = bool(w1 & 0x0004)
+    r["Waermeanforderung_HT_HK_Erweitert"] = bool(w1 & 0x0008)
+    r["Waermeanforderung_NT_HK"] = bool(w1 & 0x0010)
+    r["Max_Speichertemperatur_Erreicht"] = bool(w0 & 0x8000)
+    r["Fehler"] = bool(w0 & 0x000B)
+    r["Fehler_EEPROM"] = bool(w0 & 0x0001)
+    r["Fehler_Parameter"] = bool(w0 & 0x0002)
+    r["Fehler_Sensoren"] = bool(w0 & 0x0008)
     return r
 
 
@@ -251,6 +294,67 @@ def get_modbus_string(data: List[int], start_addr: int, length: int) -> str:
     return s
 
 
+def extract_hk_status_meldung(w0: int, mode: int, pause: int, w8: int) -> str:
+    """Exact reproduction of EB7000 firmware MessageHK (gui_hk.js:refreshHKMessages)."""
+    # Fehlerüberprüfung (Bits 0-3)
+    if w0 & 0x0001:
+        return "Fehler: EEPROM"
+    if w0 & 0x0002:
+        return "Fehler: Parameter"
+    if w0 & 0x0004:
+        return "Fehler: Programm"
+    if w0 & 0x0008:
+        return "Fehler: Sensoren überprüfen"
+
+    # HW Freigabe (Bit 6)
+    if not (w0 & 0x0040):
+        return "HK extern blockiert"
+
+    # Trockenheizen (Bits 10-12)
+    trocken = (w0 >> 10) & 0x07
+    if trocken == 1:
+        return "Trockenheizen: Sockel"
+    elif trocken == 2:
+        return "Trockenheizen: Anstieg"
+    elif trocken == 3:
+        return "Trockenheizen: Scheitel"
+    elif trocken == 4:
+        return "Trockenheizen: Abfall"
+
+    # Word 8 Sonderfunktionen
+    if w8 & 0x0004:
+        return "Sommerkick aktiv"
+    if w8 & 0x0080:
+        return "Kühlen aktiv"
+    if (not (w8 & 0x0080)) and (w8 & 0x0020):
+        return "Kühlen Pause"
+    if w8 & 0x0002:
+        return "Raumaktivierung"
+    if w8 & 0x0001:
+        return "Heizbetrieb: SpeicherWärmeÜberschuss"
+
+    # BetriebsModus (Bit 15): 0 = Winter, 1 = Sommer
+    betriebsmodus = (w0 >> 15) & 0x01
+    prog_map = {0: "Frostschutz", 1: "Spar", 2: "Normal", 3: "Schnellaufheizung"}
+    pz = (w0 >> 8) & 0x03
+    pz_name = prog_map.get(pz, "Normal")
+
+    if betriebsmodus == 1:
+        frost_hw = (w0 >> 13) & 0x03
+        if frost_hw == 2:
+            return "Frostschutz aktiv"
+        elif mode == 2:
+            return "Abschaltung aufgrund Betriebsart Frostschutz"
+        else:
+            return "Abschaltung aufgrund Aussentemperatur"
+    else:
+        # Wintermodus
+        if pause > 0:
+            return f"Zeitprogramm: {pz_name}"
+        else:
+            return f"Heizkreis in Pause (Zeitprogramm: {pz_name})"
+
+
 def extract_hk_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 8:
         return {"error": "insufficient data"}
@@ -258,13 +362,89 @@ def extract_hk_values(words: List[int]) -> Dict[str, Any]:
     for i, key in enumerate(["Vorlauftemperatur", "Rücklauftemperatur", "Vorlaufanforderung"]):
         v = get_modbus_dec(words, 3 + i, 1)
         r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
-    r["Pause"] = get_modbus_dec(words, 7, 1, signed=False)
-    r["status_bits_word0"] = get_modbus_dec(words, 0, 1, signed=False)
-    r["status_bits_word8"] = get_modbus_dec(words, 8, 1, signed=False)
-    mode = get_modbus_dec(words, 1, 1, signed=False)
+    
+    pause = get_modbus_dec(words, 7, 1, signed=False) or 0
+    w0 = get_modbus_dec(words, 0, 1, signed=False) or 0
+    w8 = get_modbus_dec(words, 8, 1, signed=False) or 0
+    mode = get_modbus_dec(words, 1, 1, signed=False) or 0
+
+    v9 = get_modbus_dec(words, 9, 1) if len(words) > 9 else None
+    r["Modul_Aussentemperatur"] = (v9 / 10.0) if v9 is not None and v9 not in (3150, -3150, 31500, -31500) else None
+
+    r["Pause"] = pause
+    r["status_bits_word0"] = w0
+    r["status_bits_word8"] = w8
     r["mode"] = mode
-    r["mode_name"] = HK_MODE_NAMES.get(mode, f"unknown({mode})") if mode is not None else None
+    r["mode_name"] = HK_MODE_NAMES.get(mode, f"unknown({mode})")
+
+    # Decoded status message
+    meldung = extract_hk_status_meldung(w0, mode, pause, w8)
+    r["Statusmeldung"] = meldung
+
+    # Sommerabschaltung is active when in Sommermodus and not in hardware-frostschutz or frostschutz mode
+    betriebsmodus = (w0 >> 15) & 0x01
+    sommerabschaltung = bool(betriebsmodus == 1 and mode != 2 and ((w0 >> 13) & 0x03) != 2)
+    r["Sommerabschaltung"] = sommerabschaltung
+    r["Betriebsmodus"] = "Sommer" if betriebsmodus == 1 else "Winter"
+
+    prog_map = {0: "Frostschutz", 1: "Spar", 2: "Normal", 3: "Schnellaufheizung"}
+    r["Programmzustand"] = prog_map.get((w0 >> 8) & 0x03, "Normal")
+
+    r["HW_Freigabe"] = bool(w0 & 0x0040)
+    r["Pause_Aktiv"] = bool(pause == 0)
+    r["Fehler"] = bool(w0 & 0x000F)
+    r["Fehler_EEPROM"] = bool(w0 & 0x0001)
+    r["Fehler_Parameter"] = bool(w0 & 0x0002)
+    r["Fehler_Programm"] = bool(w0 & 0x0004)
+    r["Fehler_Sensoren"] = bool(w0 & 0x0008)
+
+    # Sonderbetriebsarten
+    r["Sommerkick"] = bool(w8 & 0x0004)
+    r["Kuehlen_Aktiv"] = bool(w8 & 0x0080)
+    r["Kuehlen_Pause"] = bool((not (w8 & 0x0080)) and (w8 & 0x0020))
+    r["Raumaktivierung"] = bool(w8 & 0x0002)
+    r["Speicher_Waermeueberschuss"] = bool(w8 & 0x0001)
+
+    trocken_map = {0: "Aus", 1: "Sockel", 2: "Anstieg", 3: "Scheitel", 4: "Abfall"}
+    r["Trockenheizen"] = trocken_map.get((w0 >> 10) & 0x07, "Aus")
+    r["Frostschutz_Aktiv"] = bool(((w0 >> 13) & 0x03) == 2)
+
     return r
+
+
+def extract_fwe_status_meldung(w0: int, w1: int) -> str:
+    """Exact reproduction of EB7000 firmware RefreshFWEMessages (gui_fwe.js)."""
+    # Fehlerüberprüfung
+    if w0 & 0x0001:
+        return "Fehler: EEPROM"
+    if w0 & 0x0002:
+        return "Fehler: Parameter"
+    if w0 & 0x0004:
+        return "Fehler: Programm"
+    if w0 & 0x0008:
+        return "Fehler: Sensoren überprüfen"
+    if w0 & 0x0010:
+        return "Kein Durchfluss bei Zirkubetrieb"
+
+    # Meldung wenn kein Fehler
+    if w0 & 0x0020:  # Zirkulation aktiv
+        if ((w0 >> 13) & 0x07) == 4:
+            return "Tauscherabkühlung"
+        return "Zirkulation aktiv"
+
+    betriebsart = w1 & 0x01
+    prg_zustand = (w0 >> 8) & 0x03
+    zirk_zustand = (w0 >> 10) & 0x01
+    zirku_text = "frei" if zirk_zustand == 1 else "Gesperrt"
+
+    if betriebsart == 0:  # AUTOMATIK
+        if prg_zustand == 1:
+            return f"Zeitprogramm: Spar / Zirku: {zirku_text}"
+        elif prg_zustand == 2:
+            return f"Zeitprogramm: Normal / Zirku: {zirku_text}"
+        return f"Zeitprogramm / Zirku: {zirku_text}"
+    else:  # HAND
+        return f"HAND Spar / Zeitprogramm: Zirku: {zirku_text}"
 
 
 def extract_fwe_values(words: List[int]) -> Dict[str, Any]:
@@ -282,7 +462,59 @@ def extract_fwe_values(words: List[int]) -> Dict[str, Any]:
     mode = get_modbus_dec(words, 1, 1, signed=False)
     r["mode"] = mode
     r["mode_name"] = FWE_MODE_NAMES.get(mode, f"unknown({mode})") if mode is not None else None
+
+    w0 = get_modbus_dec(words, 0, 1, signed=False) or 0
+    w1 = mode or 0
+    r["status_bits_word0"] = w0
+    r["Statusmeldung"] = extract_fwe_status_meldung(w0, w1)
+    prg_map = {0: "Aus", 1: "Spar", 2: "Normal"}
+    r["Programmzustand"] = prg_map.get((w0 >> 8) & 0x03, "Normal")
+    r["Zirkulation_Aktiv"] = bool(w0 & 0x0020)
+    r["Zirkulation_Freigabe"] = bool(w0 & 0x0400)
+    r["Tauscherabkuehlung"] = bool(((w0 >> 13) & 0x07) == 4)
+    r["Fehler"] = bool(w0 & 0x001F)
+    r["Fehler_EEPROM"] = bool(w0 & 0x0001)
+    r["Fehler_Parameter"] = bool(w0 & 0x0002)
+    r["Fehler_Programm"] = bool(w0 & 0x0004)
+    r["Fehler_Sensoren"] = bool(w0 & 0x0008)
+    r["Kein_Durchfluss_Zirku"] = bool(w0 & 0x0010)
     return r
+
+
+def extract_sk_status_meldung(w0: int, leistung: float) -> str:
+    """Exact reproduction of EB7000 firmware RefreshSKMessages (gui_sk.js)."""
+    if w0 & 0x0001:
+        return "Fehler: EEPROM"
+    if w0 & 0x0002:
+        return "Fehler: Parameter"
+    if w0 & 0x0004:
+        return "Fehler: Programm"
+    if w0 & 0x0008:
+        return "Fehler: Sensoren überprüfen"
+    if w0 & 0x0010:
+        return "Durchfluss überprüfen"
+
+    if (w0 & 0x0080) == 0:
+        return "Solar Nachtabschaltung"
+    if w0 & 0x0200:
+        return "Notausfunktion aktiv"
+
+    reglerstatus = (w0 >> 10) & 0x0F
+    if reglerstatus in (0, 1):
+        return "Solar Pause"
+    elif reglerstatus in (2, 3):
+        return "Anlauf"
+    elif reglerstatus == 4:
+        return f"Solar Aktiv (highFlow: {leistung:.1f} kW)"
+    elif reglerstatus == 5:
+        return f"Solar Aktiv (lowFlow: {leistung:.1f} kW)"
+    elif reglerstatus == 6:
+        return f"Solar Aktiv ({leistung:.1f} kW)"
+    elif reglerstatus in (7, 8):
+        return f"Solar Aktiv (HK_Direkt: {leistung:.1f} kW)"
+    elif reglerstatus == 9:
+        return f"Solar Aktiv (Einspritzen: {leistung:.1f} kW)"
+    return "Solar Bereit"
 
 
 def extract_sk_values(words: List[int]) -> Dict[str, Any]:
@@ -299,7 +531,30 @@ def extract_sk_values(words: List[int]) -> Dict[str, Any]:
             r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
     low = get_modbus_dec(words, 7, 1, signed=False) or 0
     high = get_modbus_dec(words, 8, 1, signed=False) or 0
-    r["Leistung_kW"] = (low + high * 65535) / 1000.0
+    leistung = (low + high * 65535) / 1000.0
+    r["Leistung_kW"] = leistung
+
+    w0 = get_modbus_dec(words, 0, 1, signed=False) or 0
+    r["status_bits_word0"] = w0
+    r["Statusmeldung"] = extract_sk_status_meldung(w0, leistung)
+    regler_map = {
+        0: "Pause", 1: "Pause",
+        2: "Anlauf", 3: "Anlauf",
+        4: "HighFlow", 5: "LowFlow",
+        6: "Notkühlung",
+        7: "HK Bedarf", 8: "HK Bedarf",
+        9: "Einspritzen",
+    }
+    regler_idx = (w0 >> 10) & 0x0F
+    r["Reglerstatus"] = regler_map.get(regler_idx, f"Status_{regler_idx}")
+    r["Nachtabschaltung"] = bool((w0 & 0x0080) == 0)
+    r["Notaus"] = bool(w0 & 0x0200)
+    r["Fehler"] = bool(w0 & 0x001F)
+    r["Fehler_EEPROM"] = bool(w0 & 0x0001)
+    r["Fehler_Parameter"] = bool(w0 & 0x0002)
+    r["Fehler_Programm"] = bool(w0 & 0x0004)
+    r["Fehler_Sensoren"] = bool(w0 & 0x0008)
+    r["Durchfluss_Pruefen"] = bool(w0 & 0x0010)
     return r
 
 
@@ -313,12 +568,20 @@ def extract_hk_settings(words: List[int]) -> Dict[str, Any]:
     if len(words) < 60:
         return {}
     r: Dict[str, Any] = {}
+    v14 = get_modbus_dec(words, 14, 1)
+    r["Heizkurve_Steilheit"] = (v14 / 10.0) if v14 is not None else None
     v = get_modbus_dec(words, 15, 1)
     r["Parallelverschiebung"] = (v / 10.0) if v is not None else None
+    v18 = get_modbus_dec(words, 18, 1)
+    r["Vorlauf_Max"] = (v18 / 10.0) if v18 is not None and v18 not in (3150, -3150, 31500, -31500) else None
+    v19 = get_modbus_dec(words, 19, 1)
+    r["Vorlauf_Min"] = (v19 / 10.0) if v19 is not None and v19 not in (3150, -3150, 31500, -31500) else None
     v = get_modbus_dec(words, 20, 1)
     r["Absenkung"] = (v / 10.0) if v is not None else None
     v = get_modbus_dec(words, 21, 1)
     r["Schnellaufheizung"] = (v / 10.0) if v is not None else None
+    v25 = get_modbus_dec(words, 25, 1)
+    r["Norm_Aussentemperatur"] = float(v25) if v25 is not None else None
     v = get_modbus_dec(words, 59, 1)
     r["AusAussentemperatur"] = (v / 10.0) if v is not None else None
     return r
@@ -360,6 +623,32 @@ def extract_fwe_settings(words: List[int]) -> Dict[str, Any]:
     return r
 
 
+def extract_wq_status_meldung(w0: int) -> str:
+    """Exact reproduction of EB7000 firmware refreshWQMessages (gui_wq.js)."""
+    if w0 & 0x0001:
+        return "Fehler: EEPROM"
+    if w0 & 0x0002:
+        return "Fehler: Parameter"
+    if w0 & 0x0004:
+        return "Fehler: Programm"
+    if w0 & 0x0008:
+        return "Fehler: Sensoren überprüfen"
+
+    if (w0 & 0x0040) == 0:
+        return "WQ extern blockiert"
+    if w0 & 0x0400:
+        return "Wärmeüberschuss"
+    if w0 & 0x0020:
+        return "Schornsteinfeger"
+    if ((w0 >> 8) & 0x03) == 0:
+        return "WQ gesperrt (Zeitprogramm)"
+    if w0 & 0x0010:
+        return "WQ aktiv"
+    if (w0 & 0x0010) == 0 and ((w0 >> 12) & 0x07) == 3:
+        return "WQ aktiv"
+    return "Bereit"
+
+
 def extract_wq_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 3:
         return {"error": "insufficient data"}
@@ -367,6 +656,20 @@ def extract_wq_values(words: List[int]) -> Dict[str, Any]:
     for i, key in enumerate(["Betriebstemperatur", "Rücklauftemperatur"]):
         v = get_modbus_dec(words, 1 + i, 1)
         r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
+
+    w0 = get_modbus_dec(words, 0, 1, signed=False) or 0
+    r["status_bits_word0"] = w0
+    r["Statusmeldung"] = extract_wq_status_meldung(w0)
+    r["HW_Freigabe"] = bool(w0 & 0x0040)
+    r["Angefordert"] = bool(w0 & 0x0010)
+    r["Waermeueberschuss"] = bool(w0 & 0x0400)
+    r["Schornsteinfeger"] = bool(w0 & 0x0020)
+    r["Zeitprogramm_Gesperrt"] = bool(((w0 >> 8) & 0x03) == 0)
+    r["Fehler"] = bool(w0 & 0x000F)
+    r["Fehler_EEPROM"] = bool(w0 & 0x0001)
+    r["Fehler_Parameter"] = bool(w0 & 0x0002)
+    r["Fehler_Programm"] = bool(w0 & 0x0004)
+    r["Fehler_Sensoren"] = bool(w0 & 0x0008)
     return r
 
 
@@ -619,6 +922,16 @@ __all__ = [
     "extract_wp4000_values",
     "extract_hk_settings",
     "extract_fwe_settings",
+    "extract_hk_values",
+    "extract_fwe_values",
+    "extract_sp_values",
+    "extract_sk_values",
+    "extract_wq_values",
+    "extract_hk_status_meldung",
+    "extract_fwe_status_meldung",
+    "extract_sp_status_meldung",
+    "extract_sk_status_meldung",
+    "extract_wq_status_meldung",
 ]
 
 
