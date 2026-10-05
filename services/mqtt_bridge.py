@@ -73,6 +73,10 @@ _pw: Dict[str, Any] = {"unit_of_measurement": "kW", "device_class": "power", "st
 # see extract_hk_settings()/extract_fwe_settings() in eb7000/core.py.
 _ts: Dict[str, Any] = {"unit_of_measurement": "°C", "device_class": "temperature", "icon": "mdi:tune-variant"}
 _mn: Dict[str, Any] = {"unit_of_measurement": "min", "icon": "mdi:timer-outline"}
+_st: Dict[str, Any] = {"icon": "mdi:information-outline"}
+_bm: Dict[str, Any] = {"icon": "mdi:calendar-range"}
+_pr: Dict[str, Any] = {"icon": "mdi:clock-outline"}
+_cu: Dict[str, Any] = {"icon": "mdi:chart-bell-curve"}
 
 # Catalog of all known sensors per object type.
 # Keys are the field names as they appear in the JSON state (from extract_* functions).
@@ -85,12 +89,23 @@ SENSOR_CATALOG: Dict[str, List[tuple]] = {
         ("Absenkung", _ts),
         ("Schnellaufheizung", _ts),
         ("AusAussentemperatur", _ts),
+        ("Norm_Aussentemperatur", _ts),
+        ("Heizkurve_Steilheit", _cu),
+        ("Vorlauf_Max", _ts),
+        ("Vorlauf_Min", _ts),
+        ("Modul_Aussentemperatur", _ot),
+        ("Statusmeldung", _st),
+        ("Betriebsmodus", _bm),
+        ("Programmzustand", _pr),
+        ("Trockenheizen", {"icon": "mdi:radiator"}),
     ],
     "fwe": [
         ("Kaltwasser_&_Zirkulation", _wt),
         ("Warmwasser", _wt),
         ("Eintritt_Wärmetauscher", _wt),
         ("Zapfmenge", _fl),
+        ("Statusmeldung", _st),
+        ("Programmzustand", _pr),
         ("WWNormalSollTemperatur", _ts),
         ("WWSparSollTemperatur", _ts),
         ("ZirkulationPausenzeit", _mn),
@@ -102,10 +117,12 @@ SENSOR_CATALOG: Dict[str, List[tuple]] = {
         ("NT_Niveau", _wt),
         ("SP_unten", _wt),
         ("Außentemperatur", _ot),
+        ("Statusmeldung", _st),
     ],
     "wq": [
         ("Betriebstemperatur", _ot),
         ("Rücklauftemperatur", _ot),
+        ("Statusmeldung", _st),
     ],
     "sk": [
         ("Kollektortemperatur_F1", _ot),
@@ -114,6 +131,8 @@ SENSOR_CATALOG: Dict[str, List[tuple]] = {
         ("Nutztemperatur", _ot),
         ("Solardurchfluss", _fl),
         ("Leistung_kW", _pw),
+        ("Statusmeldung", _st),
+        ("Reglerstatus", {"icon": "mdi:state-machine"}),
     ],
     "wpint": [
         ("Vorlauftemperatur", _wt),
@@ -134,6 +153,72 @@ SENSOR_CATALOG: Dict[str, List[tuple]] = {
         ("QuellenAUS", _ot),
         ("WP_Vorlauf", _wt),
         ("WP_Rücklauf", _wt),
+    ],
+}
+
+# Binary sensors per object type (Sommerabschaltung, Sonderbetriebsarten, Freigaben, Fehler).
+BINARY_SENSOR_CATALOG: Dict[str, List[tuple]] = {
+    "hk": [
+        ("Sommerabschaltung", {"icon": "mdi:weather-sunny"}),
+        ("HW_Freigabe", {"icon": "mdi:check-circle-outline"}),
+        ("Pause_Aktiv", {"icon": "mdi:pause-circle-outline"}),
+        ("Fehler", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+        ("Fehler_EEPROM", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Parameter", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Programm", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Sensoren", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Sommerkick", {"icon": "mdi:pump"}),
+        ("Kuehlen_Aktiv", {"icon": "mdi:snowflake"}),
+        ("Kuehlen_Pause", {"icon": "mdi:snowflake-alert"}),
+        ("Raumaktivierung", {"icon": "mdi:home-thermometer-outline"}),
+        ("Speicher_Waermeueberschuss", {"icon": "mdi:fire-alert"}),
+        ("Frostschutz_Aktiv", {"icon": "mdi:snowflake-melt"}),
+    ],
+    "fwe": [
+        ("Zirkulation_Aktiv", {"icon": "mdi:pump"}),
+        ("Zirkulation_Freigabe", {"icon": "mdi:check-circle-outline"}),
+        ("Tauscherabkuehlung", {"icon": "mdi:snowflake-melt"}),
+        ("Fehler", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+        ("Fehler_EEPROM", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Parameter", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Programm", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Sensoren", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Kein_Durchfluss_Zirku", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+    ],
+    "sp": [
+        ("WW_Vorrang", {"icon": "mdi:water-boiler-alert"}),
+        ("Waermeanforderung_FWE", {"icon": "mdi:water-boiler"}),
+        ("Waermeanforderung_FWE_Erweitert", {"icon": "mdi:water-boiler"}),
+        ("Waermeanforderung_HT_HK", {"icon": "mdi:radiator"}),
+        ("Waermeanforderung_HT_HK_Erweitert", {"icon": "mdi:radiator"}),
+        ("Waermeanforderung_NT_HK", {"icon": "mdi:radiator"}),
+        ("Max_Speichertemperatur_Erreicht", {"icon": "mdi:thermometer-alert"}),
+        ("Fehler", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+        ("Fehler_EEPROM", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Parameter", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Sensoren", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+    ],
+    "wq": [
+        ("HW_Freigabe", {"icon": "mdi:check-circle-outline"}),
+        ("Angefordert", {"icon": "mdi:fire"}),
+        ("Waermeueberschuss", {"icon": "mdi:fire-alert"}),
+        ("Schornsteinfeger", {"icon": "mdi:account-hard-hat"}),
+        ("Zeitprogramm_Gesperrt", {"icon": "mdi:clock-alert-outline"}),
+        ("Fehler", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+        ("Fehler_EEPROM", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Parameter", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Programm", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Sensoren", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+    ],
+    "sk": [
+        ("Nachtabschaltung", {"icon": "mdi:weather-night"}),
+        ("Notaus", {"icon": "mdi:alert-octagon", "device_class": "problem"}),
+        ("Fehler", {"icon": "mdi:alert-circle", "device_class": "problem"}),
+        ("Fehler_EEPROM", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Parameter", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Programm", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Fehler_Sensoren", {"icon": "mdi:alert-circle-outline", "device_class": "problem"}),
+        ("Durchfluss_Pruefen", {"icon": "mdi:alert-circle", "device_class": "problem"}),
     ],
 }
 
@@ -363,6 +448,24 @@ def publish_discovery(client: mqtt.Client) -> None:
                 "name": name,
                 "state_topic": f"{base}/state",
                 "value_template": value_template,
+                "unique_id": unique_id,
+                "device": device,
+                **meta,
+            })
+
+        # Binary sensors: one entity per catalog entry per enabled object
+        for field_name, meta in BINARY_SENSOR_CATALOG.get(obj_type, []):
+            field_slug = _slugify(field_name)
+            unique_id = f"{ID_PREFIX}{obj_key}_{field_slug}"
+            field_display = field_name.replace("_", " ")
+            name = f"{SENSOR_PREFIX}{obj_key.upper()} {field_display}"
+            value_template = f'{{{{ "ON" if value_json["{obj_key}"]["{field_name}"] else "OFF" }}}}'
+            _pub(f"binary_sensor/{node_id}/{obj_key}_{field_slug}/config", {
+                "name": name,
+                "state_topic": f"{base}/state",
+                "value_template": value_template,
+                "payload_on": "ON",
+                "payload_off": "OFF",
                 "unique_id": unique_id,
                 "device": device,
                 **meta,
