@@ -204,6 +204,69 @@ def build_hk_urlaub_fc4c_hex(hk: int, urlaub_days: int) -> Optional[str]:
     return f"00010000000b{unit_hex}4c{addr_hex}0002040003{days_hex}"
 
 
+def _build_modbus_fc06(unit: int, reg_addr: int, value: int) -> bytes:
+    tid, pid = 1, 0
+    pdu = bytes([unit, 0x06]) + struct.pack(">HH", reg_addr, value & 0xFFFF)
+    return struct.pack(">HHH", tid, pid, len(pdu)) + pdu
+
+
+def _build_modbus_fc10(unit: int, reg_addr: int, values: List[int]) -> bytes:
+    tid, pid = 1, 0
+    data = b"".join(struct.pack(">H", v & 0xFFFF) for v in values)
+    pdu = bytes([unit, 0x10]) + struct.pack(">HHB", reg_addr, len(values), len(data)) + data
+    return struct.pack(">HHH", tid, pid, len(pdu)) + pdu
+
+
+def set_fwe_temp(temp_celsius: float, spar: bool = False, host: str = HOST, port: int = PORT) -> bool:
+    """
+    Set FWE (Warmwasser) target temperature in °C (valid range 35.0 - 75.0 °C).
+    spar=False: sets WWNormalSollTemperatur (reg 0x3809)
+    spar=True:  sets WWSparSollTemperatur (reg 0x380A)
+    """
+    if not (35.0 <= temp_celsius <= 75.0):
+        return False
+    val_int = int(round(temp_celsius * 10.0))
+    reg_addr = 0x380A if spar else 0x3809
+    cmd = _build_modbus_fc10(80, reg_addr, [val_int])
+    resp = _send_modbus(cmd, host, port)
+    return resp is not None and len(resp) >= 8 and resp[7] == 0x10
+
+
+def set_wpsiem_mode(mode: int, host: str = HOST, port: int = PORT) -> bool:
+    """
+    Set Siemens heat pump mode.
+    0: Automatik (FC 0x4C)
+    1: ManuellAus (FC 0x4C)
+    2: ManuellRESET (FC 0x06, unit 0x96=150, reg 0x5043=20547, val 1)
+    """
+    if mode == 2:
+        cmd = _build_modbus_fc06(150, 0x5043, 1)
+        resp = _send_modbus(cmd, host, port)
+        return resp is not None and len(resp) >= 8 and resp[7] == 0x06
+    elif mode in (0, 1):
+        cmd = _build_modbus_fc4c_fwe(80, 0xC000, mode)
+        resp = _send_modbus(cmd, host, port)
+        return resp is not None and len(resp) >= 8 and resp[7] == 0x4C
+    return False
+
+
+def set_wp4000_mode(mode: int, host: str = HOST, port: int = PORT) -> bool:
+    """
+    Set EB4000 heat pump mode.
+    0: Automatik
+    1: Silent
+    2: ManuellAus
+    6: ManuellRESET
+    All sent via FC 0x4C to unit 33 (0x21), start address 0x2000.
+    """
+    if mode in (0, 1, 2, 6):
+        cmd = _build_modbus_fc4c_fwe(33, 0x2000, mode)
+        resp = _send_modbus(cmd, host, port)
+        return resp is not None and len(resp) >= 8 and resp[7] == 0x4C
+    return False
+
+
+
 def extract_sp_status_meldung(w0: int, w1: int) -> str:
     """Exact reproduction of EB7000 firmware refreshSPMessages (gui_sp.js)."""
     if w0 & 0x0001:
@@ -261,6 +324,8 @@ def extract_sp_values(words: List[int]) -> Dict[str, Any]:
 
 HK_MODE_NAMES = {0: "Automatik", 1: "Party", 2: "Frostschutz", 3: "Urlaub", 4: "Anheben"}
 FWE_MODE_NAMES = {0: "Automatik", 1: "Spar"}
+WPSIEM_MODE_NAMES = {0: "Automatik", 1: "ManuellAus", 2: "ManuellRESET"}
+WP4000_MODE_NAMES = {0: "Automatik", 1: "Silent", 2: "ManuellAus", 6: "ManuellRESET"}
 
 OBJECT_FRIENDLY_NAMES = {
     "ak": "Anlagenkonfiguration",
@@ -687,6 +752,9 @@ def extract_wpsiem_values(words: List[int]) -> Dict[str, Any]:
     if len(words) < 10:
         return {"error": "insufficient data"}
     r: Dict[str, Any] = {}
+    mode = get_modbus_dec(words, 1, 1, signed=False)
+    r["mode"] = mode
+    r["mode_name"] = WPSIEM_MODE_NAMES.get(mode, f"unknown({mode})") if mode is not None else None
     for i, key in enumerate(["Vorlauftemperatur", "Rücklauftemperatur", "Quellenaustritt", "Quelleneintritt", "KühlspeicherUnten"]):
         v = get_modbus_dec(words, 5 + i, 1)
         r[key] = (v / 10.0) if v is not None and v not in (3150, -3150, 31500, -31500) else None
@@ -695,6 +763,10 @@ def extract_wpsiem_values(words: List[int]) -> Dict[str, Any]:
 
 def extract_wp4000_values(words: List[int]) -> Dict[str, Any]:
     r: Dict[str, Any] = {}
+    if len(words) > 2:
+        mode = get_modbus_dec(words, 2, 1, signed=False)
+        r["mode"] = mode
+        r["mode_name"] = WP4000_MODE_NAMES.get(mode, f"unknown({mode})") if mode is not None else None
     for i, key in enumerate(["Abtau", "QuellenEIN", "QuellenAUS"]):
         if len(words) > 12 + i:
             v = get_modbus_dec(words, 12 + i, 1)
@@ -708,6 +780,7 @@ def extract_wp4000_values(words: List[int]) -> Dict[str, Any]:
         else:
             r[key] = None
     return r
+
 
 
 def detect_present_objects(host: str = HOST, port: int = PORT) -> set:
@@ -916,6 +989,13 @@ __all__ = [
     "detect_present_objects",
     "set_hk_mode",
     "set_fwe_mode",
+    "set_fwe_temp",
+    "set_wpsiem_mode",
+    "set_wp4000_mode",
+    "HK_MODE_NAMES",
+    "FWE_MODE_NAMES",
+    "WPSIEM_MODE_NAMES",
+    "WP4000_MODE_NAMES",
     "build_hk_urlaub_fc4c_hex",
     "extract_wpint_values",
     "extract_wpsiem_values",
