@@ -101,6 +101,10 @@ Sentinel value `31500` means "sensor disconnected" and is filtered out before pu
 | `{base}/cmd/hk/{N}/mode` | subscribe | Set heating circuit N mode |
 | `{base}/cmd/hk/{N}/urlaub_days` | subscribe | Set vacation days for HK N |
 | `{base}/cmd/fwe/mode` | subscribe | Set fresh water mode |
+| `{base}/cmd/fwe/normal_temp` | subscribe | Set FWE normal target temperature (35–75 °C) |
+| `{base}/cmd/fwe/spar_temp` | subscribe | Set FWE spar target temperature (35–75 °C) |
+| `{base}/cmd/wpsiem/mode` | subscribe | Set Siemens heat pump mode |
+| `{base}/cmd/wp4000/mode` | subscribe | Set EB4000 heat pump mode |
 
 ## Supported Modes
 
@@ -109,6 +113,13 @@ Sentinel value `31500` means "sensor disconnected" and is filtered out before pu
 
 **Fresh water (FWE):**
 `Automatik` (0), `Spar` (1)
+
+**Siemens Heat Pump (WPsiem):**
+`Automatik` (0), `ManuellAus` (1), `ManuellRESET` (2)
+
+**EB4000 Heat Pump (WP4000):**
+`Automatik` (0), `Silent` (1), `ManuellAus` (2), `ManuellRESET` (6)
+
 
 ## CI/CD
 

@@ -22,10 +22,16 @@ from eb7000.core import (
     detect_present_objects,
     set_hk_mode,
     set_fwe_mode,
+    set_fwe_temp,
+    set_wpsiem_mode,
+    set_wp4000_mode,
     HK_MODE_NAMES,
     FWE_MODE_NAMES,
+    WPSIEM_MODE_NAMES,
+    WP4000_MODE_NAMES,
     build_hk_urlaub_fc4c_hex,
 )
+
 
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
@@ -240,6 +246,11 @@ def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_c
     client.subscribe(f"{base}/cmd/hk/+/mode", qos=1)
     client.subscribe(f"{base}/cmd/hk/+/urlaub_days", qos=1)
     client.subscribe(f"{base}/cmd/fwe/mode", qos=1)
+    client.subscribe(f"{base}/cmd/fwe/normal_temp", qos=1)
+    client.subscribe(f"{base}/cmd/fwe/spar_temp", qos=1)
+    client.subscribe(f"{base}/cmd/fwe/temp", qos=1)
+    client.subscribe(f"{base}/cmd/wpsiem/mode", qos=1)
+    client.subscribe(f"{base}/cmd/wp4000/mode", qos=1)
     if MQTT_DISCOVERY_ENABLE:
         client.subscribe(f"{MQTT_DISCOVERY_PREFIX}/status", qos=1)
         if ENABLED_OBJECTS:
@@ -319,6 +330,52 @@ def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> No
         if ok:
             mode_name = FWE_MODE_NAMES.get(mode, f"unknown({mode})")
             client.publish(f"{base}/fwe/mode_name", mode_name, qos=1, retain=True)
+        return
+
+    if topic in (f"{base}/cmd/fwe/normal_temp", f"{base}/cmd/fwe/spar_temp", f"{base}/cmd/fwe/temp"):
+        spar = (topic == f"{base}/cmd/fwe/spar_temp")
+        try:
+            temp = float(payload)
+        except ValueError:
+            print(f"[WARN] Invalid FWE target temperature payload: {payload!r}")
+            return
+        ok = set_fwe_temp(temp, spar=spar, host=EB7000_HOST, port=EB7000_PORT)
+        if ok:
+            temp_type = "Spar" if spar else "Normal"
+            print(f"[CMD] FWE {temp_type} target temperature set to {temp:.1f} °C")
+            client.publish(f"{base}/fwe/{'spar' if spar else 'normal'}_temp", f"{temp:.1f}", qos=1, retain=True)
+        else:
+            print(f"[ERROR] Failed to set FWE target temperature to {temp:.1f} °C")
+        return
+
+    if topic == f"{base}/cmd/wpsiem/mode":
+        mode = _parse_wp_mode(payload, WPSIEM_MODE_NAMES)
+        if mode is None:
+            print(f"[WARN] Unknown WPsiem mode payload: {payload!r}")
+            return
+        ok = set_wpsiem_mode(mode, host=EB7000_HOST, port=EB7000_PORT)
+        if ok:
+            mode_name = WPSIEM_MODE_NAMES.get(mode, f"unknown({mode})")
+            client.publish(f"{base}/wpsiem/mode_name", mode_name, qos=1, retain=True)
+            print(f"[CMD] WPsiem mode set to {mode_name} ({mode})")
+        else:
+            print(f"[ERROR] Failed to set WPsiem mode to {mode}")
+        return
+
+    if topic == f"{base}/cmd/wp4000/mode":
+        mode = _parse_wp_mode(payload, WP4000_MODE_NAMES)
+        if mode is None:
+            print(f"[WARN] Unknown WP4000 mode payload: {payload!r}")
+            return
+        ok = set_wp4000_mode(mode, host=EB7000_HOST, port=EB7000_PORT)
+        if ok:
+            mode_name = WP4000_MODE_NAMES.get(mode, f"unknown({mode})")
+            client.publish(f"{base}/wp4000/mode_name", mode_name, qos=1, retain=True)
+            print(f"[CMD] WP4000 mode set to {mode_name} ({mode})")
+        else:
+            print(f"[ERROR] Failed to set WP4000 mode to {mode}")
+        return
+
 
 
 def _parse_mode_payload(payload: str, is_fwe: bool = False) -> int | None:
@@ -351,6 +408,19 @@ def _parse_mode_payload(payload: str, is_fwe: bool = False) -> int | None:
     return mapping_hk.get(payload_l)
 
 
+def _parse_wp_mode(payload: str, mode_names: Dict[int, str]) -> int | None:
+    payload_l = payload.strip().lower()
+    if payload_l.isdigit():
+        val = int(payload_l)
+        if val in mode_names:
+            return val
+    clean_payload = payload_l.replace(" ", "").replace("_", "")
+    for k, v in mode_names.items():
+        if v.lower().replace(" ", "").replace("_", "") == clean_payload:
+            return k
+    return None
+
+
 def publish_state(client: mqtt.Client) -> None:
     global _discovery_done
 
@@ -377,8 +447,14 @@ def publish_state(client: mqtt.Client) -> None:
             fwe_mode = data.get("fwe", {}).get("mode_name")
             if fwe_mode is not None:
                 client.publish(f"{base}/fwe/mode_name", fwe_mode, qos=1, retain=True)
+        for wp_key in ("wpsiem", "wp4000"):
+            if wp_key in ENABLED_OBJECTS:
+                wp_mode = data.get(wp_key, {}).get("mode_name")
+                if wp_mode is not None:
+                    client.publish(f"{base}/{wp_key}/mode_name", wp_mode, qos=1, retain=True)
     except Exception as exc:
         print(f"[WARN] mode topic publish failed: {exc}")
+
 
 
 def _device_info() -> Dict[str, Any]:
@@ -495,7 +571,7 @@ def publish_discovery(client: mqtt.Client) -> None:
             "device": device,
         })
 
-    # FWE mode select
+    # FWE mode select and target temperatures
     if "fwe" in ENABLED_OBJECTS:
         select_id = f"{ID_PREFIX}fwe_mode"
         _pub(f"select/{node_id}/fwe_mode/config", {
@@ -507,6 +583,62 @@ def publish_discovery(client: mqtt.Client) -> None:
             "unique_id": select_id,
             "device": device,
         })
+        _pub(f"number/{node_id}/fwe_ww_normal_soll/config", {
+            "name": f"{SENSOR_PREFIX}FWE Warmwasser Normal Soll",
+            "state_topic": f"{base}/state",
+            "value_template": "{{ value_json.fwe.WWNormalSollTemperatur }}",
+            "command_topic": f"{base}/cmd/fwe/normal_temp",
+            "min": 35,
+            "max": 75,
+            "step": 1,
+            "unit_of_measurement": "°C",
+            "device_class": "temperature",
+            "mode": "box",
+            "unique_id": f"{ID_PREFIX}fwe_ww_normal_soll",
+            "device": device,
+        })
+        _pub(f"number/{node_id}/fwe_ww_spar_soll/config", {
+            "name": f"{SENSOR_PREFIX}FWE Warmwasser Spar Soll",
+            "state_topic": f"{base}/state",
+            "value_template": "{{ value_json.fwe.WWSparSollTemperatur }}",
+            "command_topic": f"{base}/cmd/fwe/spar_temp",
+            "min": 35,
+            "max": 75,
+            "step": 1,
+            "unit_of_measurement": "°C",
+            "device_class": "temperature",
+            "mode": "box",
+            "unique_id": f"{ID_PREFIX}fwe_ww_spar_soll",
+            "device": device,
+        })
+
+    # Heat pump mode selects
+    if "wpsiem" in ENABLED_OBJECTS:
+        select_id = f"{ID_PREFIX}wpsiem_mode"
+        _pub(f"select/{node_id}/wpsiem_mode/config", {
+            "name": f"{SENSOR_PREFIX}WPSIEM Modus",
+            "state_topic": f"{base}/wpsiem/mode_name",
+            "command_topic": f"{base}/cmd/wpsiem/mode",
+            "value_template": "{{ value }}",
+            "options": list(WPSIEM_MODE_NAMES.values()),
+            "unique_id": select_id,
+            "device": device,
+            "icon": "mdi:heat-pump",
+        })
+
+    if "wp4000" in ENABLED_OBJECTS:
+        select_id = f"{ID_PREFIX}wp4000_mode"
+        _pub(f"select/{node_id}/wp4000_mode/config", {
+            "name": f"{SENSOR_PREFIX}WP4000 Modus",
+            "state_topic": f"{base}/wp4000/mode_name",
+            "command_topic": f"{base}/cmd/wp4000/mode",
+            "value_template": "{{ value }}",
+            "options": list(WP4000_MODE_NAMES.values()),
+            "unique_id": select_id,
+            "device": device,
+            "icon": "mdi:heat-pump",
+        })
+
 
 
 def main() -> None:
