@@ -3,6 +3,9 @@ from .core import (
     set_hk_mode,
     set_fwe_mode,
     set_fwe_temp,
+    set_hk_heizkurve,
+    set_hk_setting,
+    HK_SETTINGS,
     set_wpsiem_mode,
     set_wp4000_mode,
 )
@@ -12,6 +15,9 @@ __all__ = [
     "set_hk_mode",
     "set_fwe_mode",
     "set_fwe_temp",
+    "set_hk_heizkurve",
+    "set_hk_setting",
+    "HK_SETTINGS",
     "set_wpsiem_mode",
     "set_wp4000_mode",
 ]

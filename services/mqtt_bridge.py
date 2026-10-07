@@ -23,6 +23,8 @@ from eb7000.core import (
     set_hk_mode,
     set_fwe_mode,
     set_fwe_temp,
+    set_hk_setting,
+    HK_SETTINGS,
     set_wpsiem_mode,
     set_wp4000_mode,
     HK_MODE_NAMES,
@@ -230,6 +232,15 @@ BINARY_SENSOR_CATALOG: Dict[str, List[tuple]] = {
 
 _discovery_done = False
 # Last requested Urlaub days per HK, used when sending mode=Urlaub.
+# HK_SETTINGS key -> key in the published state JSON (see extract_hk_settings)
+HK_STATE_KEYS = {
+    "steilheit": "Heizkurve_Steilheit",
+    "parallelverschiebung": "Parallelverschiebung",
+    "absenkung": "Absenkung",
+    "schnellaufheizung": "Schnellaufheizung",
+    "aus_aussentemperatur": "AusAussentemperatur",
+}
+
 _urlaub_days: Dict[int, int] = {}
 
 
@@ -245,6 +256,8 @@ def _on_connect(client: mqtt.Client, userdata: Any, connect_flags: Any, reason_c
     base = MQTT_BASE_TOPIC
     client.subscribe(f"{base}/cmd/hk/+/mode", qos=1)
     client.subscribe(f"{base}/cmd/hk/+/urlaub_days", qos=1)
+    for _key in HK_SETTINGS:
+        client.subscribe(f"{base}/cmd/hk/+/{_key}", qos=1)
     client.subscribe(f"{base}/cmd/fwe/mode", qos=1)
     client.subscribe(f"{base}/cmd/fwe/normal_temp", qos=1)
     client.subscribe(f"{base}/cmd/fwe/spar_temp", qos=1)
@@ -289,6 +302,20 @@ def _on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> No
             return
         _urlaub_days[hk_num] = days
         client.publish(f"{base}/hk{hk_num}/urlaub_days", days, qos=1, retain=True)
+        return
+
+    if topic.startswith(f"{base}/cmd/hk/") and topic.rsplit("/", 1)[-1] in HK_SETTINGS:
+        key = topic.rsplit("/", 1)[-1]
+        try:
+            hk_num = int(topic[len(f"{base}/cmd/hk/") : -len(key) - 1])
+            value = float(payload)
+        except ValueError:
+            print(f"[WARN] Invalid HK setting command: {topic} {payload!r}")
+            return
+        if set_hk_setting(hk_num, key, value, host=EB7000_HOST, port=EB7000_PORT):
+            print(f"[CMD] HK{hk_num} {key} set to {value}")
+        else:
+            print(f"[ERROR] Failed to set HK{hk_num} {key} to {value!r}")
         return
 
     if topic.startswith(f"{base}/cmd/hk/") and topic.endswith("/mode"):
@@ -570,6 +597,27 @@ def publish_discovery(client: mqtt.Client) -> None:
             "unique_id": number_id,
             "device": device,
         })
+
+    # Installer settings (Heizkurve etc.) as config numbers; state comes from the
+    # polled config block, so the value updates on the next poll after a write.
+    for hk_id in hk_ids:
+        hk_key = f"hk{hk_id}"
+        for key, (_off, _scale, lo, hi, step, unit, label) in HK_SETTINGS.items():
+            state_key = HK_STATE_KEYS[key]
+            cfg = {
+                "name": f"{SENSOR_PREFIX}HK{hk_id} {label}",
+                "state_topic": f"{base}/state",
+                "value_template": "{{ value_json." + hk_key + "." + state_key + " }}",
+                "command_topic": f"{base}/cmd/hk/{hk_id}/{key}",
+                "min": lo, "max": hi, "step": step, "mode": "box",
+                "icon": "mdi:chart-bell-curve",
+                "entity_category": "config",
+                "unique_id": f"{ID_PREFIX}{hk_key}_{key}",
+                "device": device,
+            }
+            if unit:
+                cfg["unit_of_measurement"] = unit
+            _pub(f"number/{node_id}/{hk_key}_{key}/config", cfg)
 
     # FWE mode select and target temperatures
     if "fwe" in ENABLED_OBJECTS:

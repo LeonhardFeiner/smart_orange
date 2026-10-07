@@ -5,6 +5,7 @@ This is a copy of the implementation originally developed in
 `read_web_ui_values.py`, without the CLI entrypoint.
 """
 
+import time
 import socket
 import struct
 from typing import Any, List, Optional, Dict
@@ -230,6 +231,54 @@ def set_fwe_temp(temp_celsius: float, spar: bool = False, host: str = HOST, port
     cmd = _build_modbus_fc10(80, reg_addr, [val_int])
     resp = _send_modbus(cmd, host, port)
     return resp is not None and len(resp) >= 8 and resp[7] == 0x10
+
+
+HK_CONFIG_ADDRS = {1: (80, 0x2800), 2: (80, 0x3000), 3: (17, 0x2000)}
+
+# Writable installer settings in the HK config block (offsets as in
+# extract_hk_settings): key -> (word offset, scale, min, max, step, unit, label).
+# Limits were read off the panel's min/max on HK3 (2026-10-07). Vorlauf Min/Max
+# and Norm-Außentemperatur are deliberately not writable: panel limits unverified.
+HK_SETTINGS = {
+    "steilheit": (14, 10, 0.0, 0.8, 0.1, None, "Heizkurve Steilheit"),
+    "parallelverschiebung": (15, 10, -10.0, 20.0, 0.5, "K", "Parallelverschiebung"),
+    "absenkung": (20, 10, 0.0, 40.0, 0.5, "K", "Absenkung"),
+    "schnellaufheizung": (21, 10, 0.0, 25.0, 0.5, "K", "Schnellaufheizung"),
+    "aus_aussentemperatur": (59, 10, -20.0, 50.0, 0.5, "°C", "Aus-Außentemperatur"),
+}
+
+
+def _read_hk_word(hk: int, offset: int, host: str, port: int) -> Optional[int]:
+    unit, start = HK_CONFIG_ADDRS[hk]
+    for attempt in range(3):  # config reads fail intermittently (esp. hk3)
+        words = read_actual_values_fc03(unit, start + offset, 1, host=host, port=port)
+        if words:
+            return words[0]
+        time.sleep(0.3)
+    return None
+
+
+def set_hk_setting(hk: int, key: str, value: float, host: str = HOST, port: int = PORT) -> bool:
+    """
+    Write one installer setting of HK1..3 (see HK_SETTINGS) via FC 0x10 into the
+    config bank, then read it back to verify. Values are range-checked.
+    """
+    if hk not in HK_CONFIG_ADDRS or key not in HK_SETTINGS:
+        return False
+    offset, scale, lo, hi, _step, _unit, _label = HK_SETTINGS[key]
+    if not (lo <= value <= hi):
+        return False
+    raw = int(round(value * scale)) & 0xFFFF
+    unit, start = HK_CONFIG_ADDRS[hk]
+    reg = start + offset
+    resp = _send_modbus(_build_modbus_fc10(unit, reg, [raw]), host, port)
+    if not (resp is not None and len(resp) >= 8 and resp[7] == 0x10):
+        return False
+    return _read_hk_word(hk, offset, host, port) == raw
+
+
+def set_hk_heizkurve(hk: int, steilheit: float, host: str = HOST, port: int = PORT) -> bool:
+    return set_hk_setting(hk, "steilheit", steilheit, host=host, port=port)
 
 
 def set_wpsiem_mode(mode: int, host: str = HOST, port: int = PORT) -> bool:
